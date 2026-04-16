@@ -34,31 +34,62 @@ struct RootView: View {
             .listStyle(.sidebar)
             .navigationSplitViewColumnWidth(min: 190, ideal: 210, max: 250)
         } detail: {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
-                    Text(selection.rawValue)
-                        .font(.system(size: 28, weight: .bold))
-                        .padding(.top, 8)
+            VStack(spacing: 0) {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 24) {
+                        Text(selection.rawValue)
+                            .font(.system(size: 28, weight: .bold))
+                            .padding(.top, 8)
 
-                    Group {
-                        switch selection {
-                        case .appearance: AppearanceView(model: model)
-                        case .functions:  FunctionsView(model: model)
-                        case .shortcuts:  ShortcutsView(model: model)
-                        case .about:      AboutView()
+                        Group {
+                            switch selection {
+                            case .appearance: AppearanceView(model: model)
+                            case .functions:  FunctionsView(model: model)
+                            case .shortcuts:  ShortcutsView(model: model)
+                            case .about:      AboutView()
+                            }
                         }
                     }
+                    .frame(maxWidth: 640, alignment: .leading)
+                    .padding(.horizontal, 36)
+                    .padding(.vertical, 28)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .frame(maxWidth: 640, alignment: .leading)
-                .padding(.horizontal, 36)
-                .padding(.vertical, 28)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .scrollContentBackground(.hidden)
+
+                // ── Save / Revert bar ──
+                if selection != .about {
+                    Divider()
+                    HStack {
+                        if model.isDirty {
+                            Text("有未保存的更改")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button("还原") {
+                            model.revert()
+                        }
+                        .disabled(!model.isDirty)
+
+                        Button("保存") {
+                            model.save()
+                        }
+                        .disabled(!model.isDirty)
+                        .keyboardShortcut("s", modifiers: .command)
+                        .buttonStyle(.borderedProminent)
+                    }
+                    .padding(.horizontal, 36)
+                    .padding(.vertical, 12)
+                }
             }
-            .scrollContentBackground(.hidden)
             .background(Color.clear)
         }
         .background(Color.clear)
         .background(FrostedWindowInstaller())
+        .onChange(of: model.config) { _, _ in
+            model.markDirty()
+        }
     }
 }
 

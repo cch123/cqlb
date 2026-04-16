@@ -167,14 +167,14 @@ private final class CandidateView: NSView {
         }
 
         if _horizontal {
-            // Horizontal: all candidates in one row, sum their widths.
             var totalW: CGFloat = hPad
             for (i, c) in state.candidates.enumerated() {
                 let textW = (c.text as NSString).size(withAttributes: textAttr).width
-                totalW += 20 + textW + 12  // "N." + text + gap
+                totalW += 20 + textW
                 if !c.annotation.isEmpty {
-                    totalW += (c.annotation as NSString).size(withAttributes: annoAttr).width + 8
+                    totalW += (c.annotation as NSString).size(withAttributes: annoAttr).width + 6
                 }
+                if i < count - 1 { totalW += 12 }  // gap only between candidates
             }
             totalW += hPad
             let h = vPad + preeditH + 4 + rowH + vPad

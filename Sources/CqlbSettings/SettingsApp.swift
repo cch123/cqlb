@@ -3,19 +3,29 @@ import CqlbCore
 
 @Observable
 final class SettingsModel {
-    var config: Config {
-        didSet {
-            guard config != oldValue else { return }
-            do {
-                try ConfigStore.save(config)
-            } catch {
-                NSLog("[cqlb-settings] save failed: %@", String(describing: error))
-            }
-        }
-    }
+    var config: Config
+    var isDirty: Bool = false
 
     init() {
         self.config = ConfigStore.load()
+    }
+
+    func markDirty() {
+        isDirty = true
+    }
+
+    func save() {
+        do {
+            try ConfigStore.save(config)
+            isDirty = false
+        } catch {
+            NSLog("[cqlb-settings] save failed: %@", String(describing: error))
+        }
+    }
+
+    func revert() {
+        config = ConfigStore.load()
+        isDirty = false
     }
 }
 
