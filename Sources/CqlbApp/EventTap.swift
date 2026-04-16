@@ -194,8 +194,9 @@ final class EventTap {
 
     private func updateUI(state: EngineState) {
         if state.candidates.isEmpty {
-            if state.isPinyinMode && !state.preedit.isEmpty {
-                // Pinyin mode: keep window visible so user can backspace.
+            if (state.isPinyinMode || state.isEnglishMode) && !state.preedit.isEmpty {
+                // Pinyin / English mode: keep window visible so user can
+                // backspace or continue typing.
                 CandidateWindowController.shared.show(state: state, near: cachedCaretRect)
                 return
             }
@@ -204,7 +205,6 @@ final class EventTap {
             displayTimer = nil
             CandidateWindowController.shared.hide()
             if !state.preedit.isEmpty {
-                // Main mode had no candidates — clear the engine buffer.
                 EngineHost.shared.engine.reset()
             }
             return

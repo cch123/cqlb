@@ -117,7 +117,8 @@ public struct EngineState: Sendable {
     public var pageIndex: Int
     public var hasPrevPage: Bool
     public var hasNextPage: Bool
-    public var isPinyinMode: Bool                    // true when in i-prefix reverse lookup
+    public var isPinyinMode: Bool
+    public var isEnglishMode: Bool
 
     public static let empty = EngineState(
         preedit: "",
@@ -126,7 +127,8 @@ public struct EngineState: Sendable {
         pageIndex: 0,
         hasPrevPage: false,
         hasNextPage: false,
-        isPinyinMode: false
+        isPinyinMode: false,
+        isEnglishMode: false
     )
 }
 
@@ -489,7 +491,8 @@ public final class Engine {
             pageIndex: page,
             hasPrevPage: page > 0,
             hasNextPage: end < allCandidates.count,
-            isPinyinMode: isInPinyinMode()
+            isPinyinMode: isInPinyinMode(),
+            isEnglishMode: buffer.hasPrefix("'")
         )
     }
 
