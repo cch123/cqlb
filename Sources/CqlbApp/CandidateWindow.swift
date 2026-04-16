@@ -167,16 +167,20 @@ private final class CandidateView: NSView {
         }
 
         if _horizontal {
-            var totalW: CGFloat = hPad
+            // Mirror drawHorizontal's exact x-advance logic so width matches.
+            let idxAttr: [NSAttributedString.Key: Any] = [.font: indexFont]
+            var x: CGFloat = hPad
             for (i, c) in state.candidates.enumerated() {
-                let textW = (c.text as NSString).size(withAttributes: textAttr).width
-                totalW += 20 + textW
+                let idxW = ("\(i + 1)." as NSString).size(withAttributes: idxAttr).width
+                x += idxW + 2
+                x += (c.text as NSString).size(withAttributes: textAttr).width
                 if !c.annotation.isEmpty {
-                    totalW += (c.annotation as NSString).size(withAttributes: annoAttr).width + 6
+                    x += (c.annotation as NSString).size(withAttributes: annoAttr).width + 4 + 4
                 }
-                if i < count - 1 { totalW += 12 }  // gap only between candidates
+                if i < count - 1 { x += 12 }
             }
-            totalW += hPad
+            x += hPad
+            let totalW = x
             let h = vPad + preeditH + 4 + rowH + vPad
             return NSSize(width: min(totalW, 800), height: h)
         } else {
