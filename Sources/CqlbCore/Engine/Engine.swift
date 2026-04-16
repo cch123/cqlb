@@ -232,6 +232,20 @@ public final class Engine {
                 }
             }
 
+            // When buffer is already at max code length and there are
+            // candidates showing (rival/ambiguous case), commit the top
+            // candidate and start a new buffer with this new character.
+            if buffer.count >= config.maxCodeLength,
+               !allCandidates.isEmpty,
+               let first = allCandidates.first
+            {
+                let text = first.text
+                reset()
+                buffer.append(char)
+                recompute()
+                return .commit(text, state: state())
+            }
+
             buffer.append(char)
             recompute()
 
@@ -244,15 +258,21 @@ public final class Engine {
             // Auto-select: only for cqlb main mode, only when the buffer has
             // reached the schema's max code length, and only when the top
             // candidate's code is an EXACT match for the current buffer.
+            // Skip auto-select when multiple candidates share the same exact
+            // code — let the user pick from the candidate list instead.
             if config.autoSelect,
                buffer.count == config.maxCodeLength,
                let first = allCandidates.first,
                first.source == .main,
                first.annotation == buffer
             {
-                let text = first.text
-                reset()
-                return .commit(text, state: state())
+                let hasRival = allCandidates.count > 1
+                    && allCandidates[1].annotation == buffer
+                if !hasRival {
+                    let text = first.text
+                    reset()
+                    return .commit(text, state: state())
+                }
             }
 
             // auto_clear: max_length — if we reached max code length but have

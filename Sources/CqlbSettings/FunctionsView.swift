@@ -6,6 +6,13 @@ struct FunctionsView: View {
 
     var body: some View {
         VStack(spacing: 20) {
+            GlassPanel("系统") {
+                GlassRow("开机自动启动", hint: "登录时自动运行超强两笔") {
+                    Toggle("", isOn: $model.config.functions.launchAtLogin)
+                        .labelsHidden().toggleStyle(.switch)
+                }
+            }
+
             GlassPanel("输入辅助") {
                 VStack(spacing: 14) {
                     GlassRow("临时拼音反查", hint: "输入 3+ 字符且以 i 开头时使用拼音反查") {

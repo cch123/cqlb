@@ -132,14 +132,6 @@ final class EventTap {
             shiftWasUsedAsModifier = true
         }
 
-        // Activation hotkey: Option+Space toggles cqlb mode.
-        let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
-        let flags = event.flags
-        if keyCode == 0x31 /* Space */ && flags.contains(.maskAlternate) {
-            active.toggle()
-            return nil
-        }
-
         guard active else {
             return Unmanaged.passUnretained(event)
         }

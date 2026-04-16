@@ -6,6 +6,7 @@ import ApplicationServices
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var eventTap: EventTap?
+    private var accessibilityTimer: Timer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Log.general.log("applicationDidFinishLaunching pid=\(getpid())")
@@ -17,11 +18,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let trusted = ensureAccessibilityPermission()
         Log.general.log("accessibility trusted=\(trusted)")
-        if !trusted {
+        if trusted {
+            startEventTap()
+        } else {
             showAccessibilityAlert()
-            return
+            startAccessibilityPolling()
         }
-        startEventTap()
     }
 
     // MARK: - Status item
@@ -30,7 +32,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = item.button {
             button.title = "两"
-            button.toolTip = "超强两笔 — ⌥Space 切换"
+            button.toolTip = "超强两笔 — Shift 切换"
         }
         let menu = NSMenu()
         menu.addItem(withTitle: "超强两笔 (cqlb)", action: nil, keyEquivalent: "")
@@ -89,8 +91,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Accessibility permission
 
     private func ensureAccessibilityPermission() -> Bool {
-        let opts: NSDictionary = [kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true]
-        return AXIsProcessTrustedWithOptions(opts)
+        AXIsProcessTrusted()
     }
 
     private func showAccessibilityAlert() {
@@ -99,13 +100,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.informativeText = """
         cqlb 需要"辅助功能"权限才能全局监听键盘输入。
 
-        请到 系统设置 → 隐私与安全性 → 辅助功能,勾选 cqlb,然后重启 cqlb。
+        请到 系统设置 → 隐私与安全性 → 辅助功能,勾选 cqlb 即可,无需重启。
         """
         alert.addButton(withTitle: "打开设置")
         alert.addButton(withTitle: "稍后")
         let result = alert.runModal()
         if result == .alertFirstButtonReturn {
             openAccessibilityPrefs()
+        }
+    }
+
+    private func startAccessibilityPolling() {
+        accessibilityTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            if AXIsProcessTrusted() {
+                Log.general.log("accessibility granted, starting event tap")
+                self.accessibilityTimer?.invalidate()
+                self.accessibilityTimer = nil
+                self.startEventTap()
+            }
         }
     }
 

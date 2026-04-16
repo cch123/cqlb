@@ -1,5 +1,6 @@
 import Foundation
 import CqlbCore
+import ServiceManagement
 
 /// Process-wide holder for dictionaries and the engine. Loads once, watches
 /// the config file for live updates. Unlike the IMKit variant, a standalone
@@ -34,6 +35,7 @@ final class EngineHost {
             try? ConfigStore.save(config)
         }
         startWatchingConfig()
+        syncLoginItem(cfg)
     }
 
     private static func loadResources() -> EngineResources {
@@ -115,6 +117,25 @@ final class EngineHost {
         let cfg = ConfigStore.load()
         self.config = cfg
         self.engine.config = EngineConfig.from(cfg)
+        syncLoginItem(cfg)
+    }
+
+    private func syncLoginItem(_ cfg: Config) {
+        let service = SMAppService.mainApp
+        let desired = cfg.functions.launchAtLogin
+        let current = (service.status == .enabled)
+        guard desired != current else { return }
+        do {
+            if desired {
+                try service.register()
+                Log.general.log("registered login item")
+            } else {
+                try service.unregister()
+                Log.general.log("unregistered login item")
+            }
+        } catch {
+            Log.general.error("login item sync failed: \(error)")
+        }
     }
 
     /// Called on every activation toggle to pick up config changes that the

@@ -24,6 +24,7 @@ public struct Config: Codable, Sendable, Equatable {
     }
 
     public struct Functions: Codable, Sendable, Equatable {
+        public var launchAtLogin: Bool = false
         public var emojiSuggestion: Bool = true
         public var gb2312Filter: Bool = true
         public var tempEnglish: Bool = true
