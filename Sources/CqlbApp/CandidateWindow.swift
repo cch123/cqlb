@@ -162,8 +162,12 @@ private final class CandidateView: NSView {
         let textAttr: [NSAttributedString.Key: Any] = [.font: candidateFont]
         let annoAttr: [NSAttributedString.Key: Any] = [.font: annoFont]
         let count = state.candidates.count
+        // Preedit width sets the minimum — important for English phrase mode
+        // where the preedit can be much longer than any candidate.
+        let preeditW = (state.preedit as NSString).size(withAttributes: [.font: preeditFont]).width
+        let minWidth = max(160, preeditW + hPad * 2 + 16)
         if count == 0 {
-            return NSSize(width: 160, height: vPad + preeditH + vPad)
+            return NSSize(width: min(minWidth, 800), height: vPad + preeditH + vPad)
         }
 
         if _horizontal {
@@ -182,10 +186,9 @@ private final class CandidateView: NSView {
             x += hPad
             let totalW = x
             let h = vPad + preeditH + 4 + rowH + vPad
-            return NSSize(width: min(totalW, 800), height: h)
+            return NSSize(width: min(max(totalW, minWidth), 800), height: h)
         } else {
-            // Vertical: one candidate per row, width = widest row.
-            var maxWidth: CGFloat = 160
+            var maxWidth: CGFloat = minWidth
             for (_, c) in state.candidates.enumerated() {
                 let textW = (c.text as NSString).size(withAttributes: textAttr).width
                 let annoW = c.annotation.isEmpty ? 0 :
