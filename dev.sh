@@ -67,13 +67,14 @@ cp "$BIN_PATH" "$BUNDLE_DIR/Contents/MacOS/cqlb"
 cp Resources/Info.plist "$BUNDLE_DIR/Contents/Info.plist"
 cp Resources/cqlb.pdf "$BUNDLE_DIR/Contents/Resources/cqlb.pdf"
 
-for f in cqlb.dict.yaml cqlb.src.dict.yaml ipinyin.dict.yaml english.dict.yaml; do
-  if [ -f "$DICTS_SRC/$f" ]; then
+# Dict files: prefer repo's Dicts/ directory, fall back to ~/Library/Rime/.
+REPO_DICTS="Dicts"
+for f in cqlb.dict.yaml cqlb.src.dict.yaml ipinyin.dict.yaml english.dict.yaml emoji_word.txt emoji_category.txt; do
+  if [ -f "$REPO_DICTS/$f" ]; then
+    cp "$REPO_DICTS/$f" "$BUNDLE_DIR/Contents/Resources/Dicts/$f"
+  elif [ -f "$DICTS_SRC/$f" ]; then
     cp "$DICTS_SRC/$f" "$BUNDLE_DIR/Contents/Resources/Dicts/$f"
-  fi
-done
-for f in emoji_word.txt emoji_category.txt; do
-  if [ -f "$OPENCC_SRC/$f" ]; then
+  elif [ -f "$OPENCC_SRC/$f" ]; then
     cp "$OPENCC_SRC/$f" "$BUNDLE_DIR/Contents/Resources/Dicts/$f"
   fi
 done
