@@ -40,13 +40,21 @@ public final class CodeTable: @unchecked Sendable {
         }
 
         // Rank: exact matches first, then shortest code, then weight desc.
-        results.sort { lhs, rhs in
-            let lExact = lhs.code == prefix
-            let rExact = rhs.code == prefix
-            if lExact != rExact { return lExact }
-            if lhs.code.count != rhs.code.count { return lhs.code.count < rhs.code.count }
-            return lhs.weight > rhs.weight
+        // Use utf8.count (O(1) for native strings) instead of Character-level
+        // count (O(n)). Entry codes are ASCII pinyin-like tokens so the two
+        // values are identical. Pre-decorating avoids repeated per-compare
+        // recomputation in the sort's O(k log k) passes.
+        let prefixUtf8Count = prefix.utf8.count
+        var decorated = results.map { entry -> (entry: Entry, isExact: Bool, len: Int) in
+            let len = entry.code.utf8.count
+            return (entry, len == prefixUtf8Count && entry.code == prefix, len)
         }
+        decorated.sort { lhs, rhs in
+            if lhs.isExact != rhs.isExact { return lhs.isExact }
+            if lhs.len != rhs.len { return lhs.len < rhs.len }
+            return lhs.entry.weight > rhs.entry.weight
+        }
+        results = decorated.map(\.entry)
         if results.count > limit { results.removeLast(results.count - limit) }
         return results
     }
