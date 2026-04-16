@@ -193,8 +193,7 @@ final class EventTap {
     // MARK: - Helpers
 
     private func updateUI(state: EngineState) {
-        if state.candidates.isEmpty {
-            // Hide is always instant — no debounce.
+        if state.preedit.isEmpty && state.candidates.isEmpty {
             displayTimer?.invalidate()
             displayTimer = nil
             CandidateWindowController.shared.hide()
