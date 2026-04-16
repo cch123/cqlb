@@ -16,7 +16,13 @@ enum CaretLocator {
         if let rect = caretRectViaAccessibility() {
             return rect
         }
-        // Fallback: mouse cursor.
+        // Fallback: try the focused element's position (works for apps that
+        // expose AXPosition/AXSize but not AXBoundsForRange).
+        if let rect = focusedElementRect() {
+            // Place the candidate window at the bottom-left of the focused element.
+            return NSRect(x: rect.minX, y: rect.minY, width: 0, height: 0)
+        }
+        // Last resort: mouse cursor.
         let mouse = NSEvent.mouseLocation
         return NSRect(x: mouse.x, y: mouse.y, width: 0, height: 0)
     }
@@ -65,5 +71,45 @@ enum CaretLocator {
             return rect
         }
         return nil
+    }
+
+    /// Fallback: read AXPosition + AXSize of the focused UI element itself.
+    /// Many apps (e.g. Electron, some text fields) expose the element frame
+    /// even when they don't support AXBoundsForRange.
+    private static func focusedElementRect() -> NSRect? {
+        let system = AXUIElementCreateSystemWide()
+        var focused: AnyObject?
+        let err = AXUIElementCopyAttributeValue(
+            system,
+            kAXFocusedUIElementAttribute as CFString,
+            &focused
+        )
+        guard err == .success, let element = focused else { return nil }
+        let el = element as! AXUIElement
+
+        var posValue: AnyObject?
+        var sizeValue: AnyObject?
+        guard AXUIElementCopyAttributeValue(el, kAXPositionAttribute as CFString, &posValue) == .success,
+              AXUIElementCopyAttributeValue(el, kAXSizeAttribute as CFString, &sizeValue) == .success,
+              let posAX = posValue, let sizeAX = sizeValue
+        else { return nil }
+
+        var pos = CGPoint.zero
+        var size = CGSize.zero
+        guard AXValueGetValue(posAX as! AXValue, .cgPoint, &pos),
+              AXValueGetValue(sizeAX as! AXValue, .cgSize, &size)
+        else { return nil }
+
+        // Convert from top-left (AX) to bottom-left (Cocoa) coordinates.
+        if let screen = NSScreen.screens.first {
+            let flipped = NSRect(
+                x: pos.x,
+                y: screen.frame.maxY - pos.y - size.height,
+                width: size.width,
+                height: size.height
+            )
+            return flipped
+        }
+        return NSRect(x: pos.x, y: pos.y, width: size.width, height: size.height)
     }
 }

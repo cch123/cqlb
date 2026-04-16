@@ -24,6 +24,10 @@ public final class EmojiDict: @unchecked Sendable {
 
     public static func load(from urls: [URL]) throws -> EmojiDict {
         var map: [String: [String]] = [:]
+        // Parallel dedup sets: membership checks are O(1) instead of O(n) on
+        // each merge. Discarded after load; only `map` ships in the final
+        // `EmojiDict`.
+        var seen: [String: Set<String>] = [:]
         for url in urls {
             guard FileManager.default.fileExists(atPath: url.path) else { continue }
             let text = try String(contentsOf: url, encoding: .utf8)
@@ -41,13 +45,15 @@ public final class EmojiDict: @unchecked Sendable {
                     emojis.removeFirst()
                 }
                 if emojis.isEmpty { continue }
-                if var existing = map[key] {
-                    for e in emojis where !existing.contains(e) {
+                if var existing = map[key], var keySet = seen[key] {
+                    for e in emojis where keySet.insert(e).inserted {
                         existing.append(e)
                     }
                     map[key] = existing
+                    seen[key] = keySet
                 } else {
                     map[key] = emojis
+                    seen[key] = Set(emojis)
                 }
             }
         }

@@ -136,6 +136,12 @@ final class EventTap {
             return Unmanaged.passUnretained(event)
         }
 
+        // Caret position is refreshed lazily in `updateUI` only when we are
+        // about to show the candidate window from hidden. This avoids a
+        // cross-process Accessibility round-trip on every keystroke — which
+        // was the dominant per-key latency source, and pure overhead for
+        // fast 4-char auto-select sequences that never show the window.
+
         let key = Self.translate(event)
         let engine = EngineHost.shared.engine
         let result = engine.processKey(key)
@@ -189,6 +195,9 @@ final class EventTap {
             if (state.isPinyinMode || state.isEnglishMode) && !state.preedit.isEmpty {
                 // Pinyin / English mode: keep window visible so user can
                 // backspace or continue typing.
+                if !CandidateWindowController.shared.visible {
+                    cachedCaretRect = CaretLocator.currentCaretRect()
+                }
                 CandidateWindowController.shared.show(state: state, near: cachedCaretRect)
                 return
             }
@@ -208,9 +217,11 @@ final class EventTap {
             CandidateWindowController.shared.show(state: state, near: cachedCaretRect)
             return
         }
-        // Window not yet visible: debounce. If another keystroke arrives
-        // within 30ms, this timer is cancelled and replaced. Fast 4-char
-        // auto-select sequences never trigger a window show at all.
+        // Window not yet visible: refresh caret once (AX round-trip) and
+        // debounce. If another keystroke arrives within 30ms, this timer is
+        // cancelled and replaced. Fast 4-char auto-select sequences never
+        // trigger a window show at all, so they pay zero AX cost.
+        cachedCaretRect = CaretLocator.currentCaretRect()
         displayTimer?.invalidate()
         let caret = cachedCaretRect
         displayTimer = Timer.scheduledTimer(withTimeInterval: displayDelay, repeats: false) { [weak self] _ in
