@@ -115,6 +115,12 @@ final class EngineHost {
         let cfg = ConfigStore.load()
         self.config = cfg
         self.engine.config = EngineConfig.from(cfg)
-        Log.engine.log("config reloaded")
+    }
+
+    /// Called on every activation toggle to pick up config changes that the
+    /// file watcher may have missed (Settings uses atomic writes which
+    /// invalidate the watched fd).
+    func forceReloadConfig() {
+        reloadConfig()
     }
 }

@@ -174,6 +174,7 @@ final class EventTap {
 
     private func activeDidChange(from old: Bool) {
         if active {
+            EngineHost.shared.forceReloadConfig()
             EngineHost.shared.engine.reset()
             cachedCaretRect = CaretLocator.currentCaretRect()
             ModeIndicator.shared.show(chinese: true)
