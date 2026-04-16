@@ -117,6 +117,7 @@ public struct EngineState: Sendable {
     public var pageIndex: Int
     public var hasPrevPage: Bool
     public var hasNextPage: Bool
+    public var isPinyinMode: Bool                    // true when in i-prefix reverse lookup
 
     public static let empty = EngineState(
         preedit: "",
@@ -124,7 +125,8 @@ public struct EngineState: Sendable {
         highlightedIndex: 0,
         pageIndex: 0,
         hasPrevPage: false,
-        hasNextPage: false
+        hasNextPage: false,
+        isPinyinMode: false
     )
 }
 
@@ -271,13 +273,28 @@ public final class Engine {
     }
 
     public func selectCandidate(at index: Int) -> EngineResult {
-        // `index` is relative to the current page.
         let pageStart = pageIndex * config.candidateCount
         let absolute = pageStart + index
         guard absolute < allCandidates.count else {
             return .update(state())
         }
         let chosen = allCandidates[absolute]
+
+        // English mode: replace the last word in the buffer with the chosen
+        // completion, keeping previous words. User continues building a phrase.
+        if buffer.hasPrefix("'") {
+            let parts = buffer.split(separator: " ", omittingEmptySubsequences: false)
+            if parts.count > 1 {
+                var newParts = Array(parts.dropLast())
+                newParts.append(Substring(chosen.text))
+                buffer = newParts.joined(separator: " ") + " "
+            } else {
+                buffer = "'" + chosen.text + " "
+            }
+            recompute()
+            return .update(state())
+        }
+
         reset()
         return .commit(chosen.text, state: state())
     }
@@ -298,6 +315,13 @@ public final class Engine {
 
         case .space:
             if buffer.isEmpty { return .passthrough }
+            // English mode: space appends to buffer (building a phrase).
+            // Enter commits the whole thing.
+            if buffer.hasPrefix("'") {
+                buffer.append(" ")
+                recompute()
+                return .update(state())
+            }
             // Recognizer bypass commits buffer verbatim on space.
             if recognizer.match(buffer) != nil {
                 let out = buffer
@@ -311,8 +335,11 @@ public final class Engine {
 
         case .enter:
             if buffer.isEmpty { return .passthrough }
-            // Enter commits the raw buffer (escape hatch).
-            let out = buffer
+            // English mode: strip the leading `'` and commit the phrase.
+            // Normal mode: commit the raw buffer.
+            var out = buffer
+            if out.hasPrefix("'") { out = String(out.dropFirst()) }
+            out = out.trimmingCharacters(in: .whitespaces)
             reset()
             return .commit(out, state: state())
 
@@ -426,7 +453,10 @@ public final class Engine {
 
     private func queryEnglish(_ input: String, dict: CodeTable) -> [DisplayCandidate] {
         guard !input.isEmpty else { return [] }
-        let hits = dict.lookup(prefix: input, limit: 32)
+        // For multi-word input ("hello world"), only complete the LAST word.
+        let lastWord = input.split(separator: " ", omittingEmptySubsequences: false).last.map(String.init) ?? input
+        guard !lastWord.isEmpty else { return [] }
+        let hits = dict.lookup(prefix: lastWord, limit: 32)
         return hits.map { DisplayCandidate(text: $0.text, annotation: "", source: .english) }
     }
 
@@ -458,7 +488,8 @@ public final class Engine {
             highlightedIndex: 0,
             pageIndex: page,
             hasPrevPage: page > 0,
-            hasNextPage: end < allCandidates.count
+            hasNextPage: end < allCandidates.count,
+            isPinyinMode: isInPinyinMode()
         )
     }
 

@@ -193,10 +193,20 @@ final class EventTap {
     // MARK: - Helpers
 
     private func updateUI(state: EngineState) {
-        if state.preedit.isEmpty && state.candidates.isEmpty {
+        if state.candidates.isEmpty {
+            if state.isPinyinMode && !state.preedit.isEmpty {
+                // Pinyin mode: keep window visible so user can backspace.
+                CandidateWindowController.shared.show(state: state, near: cachedCaretRect)
+                return
+            }
+            // Main mode or empty buffer: hide and clear.
             displayTimer?.invalidate()
             displayTimer = nil
             CandidateWindowController.shared.hide()
+            if !state.preedit.isEmpty {
+                // Main mode had no candidates — clear the engine buffer.
+                EngineHost.shared.engine.reset()
+            }
             return
         }
         // If the window is ALREADY visible, update content immediately (cheap:
