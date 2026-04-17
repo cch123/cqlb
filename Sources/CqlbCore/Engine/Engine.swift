@@ -266,8 +266,9 @@ public final class Engine {
                first.source == .main,
                first.annotation == buffer
             {
-                let hasRival = allCandidates.count > 1
-                    && allCandidates[1].annotation == buffer
+                let hasRival = allCandidates.dropFirst().contains {
+                    $0.source == .main && $0.annotation == buffer
+                }
                 if !hasRival {
                     let text = first.text
                     reset()
