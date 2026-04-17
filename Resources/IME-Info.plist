@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+    <key>CFBundleExecutable</key>
+    <string>cqlb-ime</string>
+    <key>CFBundleIconFile</key>
+    <string>cqlb.pdf</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.cqlb.inputmethod</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>cqlb</string>
+    <key>CFBundleDisplayName</key>
+    <string>超强两笔</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>0.1.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>CFBundleSignature</key>
+    <string>????</string>
+    <key>CFBundleSupportedPlatforms</key>
+    <array>
+        <string>MacOSX</string>
+    </array>
+    <key>LSMinimumSystemVersion</key>
+    <string>14.0</string>
+    <!-- LSUIElement (not LSBackgroundOnly) — IMEs must be able to present UI
+         (candidate window). LSBackgroundOnly=true makes the system filter
+         us out of the input-source picker. -->
+    <key>LSUIElement</key>
+    <true/>
+    <key>NSPrincipalClass</key>
+    <string>NSApplication</string>
+
+    <!-- InputMethodKit configuration -->
+    <key>InputMethodServerControllerClass</key>
+    <string>CqlbInputController</string>
+    <key>InputMethodServerDelegateClass</key>
+    <string>CqlbInputController</string>
+    <key>InputMethodConnectionName</key>
+    <string>com.cqlb.inputmethod_Connection</string>
+
+    <key>ComponentInputModeDict</key>
+    <dict>
+        <key>tsInputModeListKey</key>
+        <dict>
+            <key>com.cqlb.inputmethod.chinese</key>
+            <dict>
+                <key>TISInputSourceID</key>
+                <string>com.cqlb.inputmethod.chinese</string>
+                <key>TISIntendedLanguage</key>
+                <string>zh-Hans</string>
+                <key>tsInputModeAlternateMenuIconFileKey</key>
+                <string>cqlb.pdf</string>
+                <key>tsInputModeCharacterRepertoireKey</key>
+                <array>
+                    <string>Hans</string>
+                </array>
+                <key>tsInputModeDefaultStateKey</key>
+                <true/>
+                <key>tsInputModeIsVisibleKey</key>
+                <true/>
+                <key>tsInputModeMenuIconFileKey</key>
+                <string>cqlb.pdf</string>
+                <key>tsInputModePaletteIconFileKey</key>
+                <string>cqlb.pdf</string>
+                <!-- Marks this as the primary/canonical mode for its script,
+                     which some system UIs use for grouping/selection. -->
+                <key>tsInputModePrimaryInScriptKey</key>
+                <true/>
+                <key>tsInputModeScriptKey</key>
+                <string>smUnicodeScript</string>
+            </dict>
+        </dict>
+        <key>tsVisibleInputModeOrderedArrayKey</key>
+        <array>
+            <string>com.cqlb.inputmethod.chinese</string>
+        </array>
+    </dict>
+
+    <key>tsInputMethodIconFileKey</key>
+    <string>cqlb.pdf</string>
+
+    <!-- Top-level TISInputSourceID (Squirrel has this too). Some macOS
+         versions use this as the parent identifier when enumerating. -->
+    <key>TISInputSourceID</key>
+    <string>com.cqlb.inputmethod</string>
+    <!-- Caps Lock can toggle between this IME and ABC — matches Squirrel. -->
+    <key>TICapsLockLanguageSwitchCapable</key>
+    <true/>
+</dict>
+</plist>
