@@ -142,6 +142,7 @@ public final class Engine {
     private var buffer: String = ""
     private var allCandidates: [DisplayCandidate] = []
     private var pageIndex: Int = 0
+    private var highlightedIndex: Int = 0
 
     public init(resources: EngineResources, config: EngineConfig = .default) {
         self.resources = resources
@@ -159,6 +160,7 @@ public final class Engine {
         buffer = ""
         allCandidates = []
         pageIndex = 0
+        highlightedIndex = 0
         punctuator.reset()
     }
 
@@ -235,8 +237,14 @@ public final class Engine {
             // When buffer is already at max code length and there are
             // candidates showing (rival/ambiguous case), commit the top
             // candidate and start a new buffer with this new character.
+            // Only applies to cqlb main mode — English (`'`-prefix) and
+            // pinyin reverse lookup (`i`-prefix) allow codes longer than
+            // the schema's 4-char maximum, so committing mid-word here
+            // would cut the user off before they finish typing.
             if buffer.count >= config.maxCodeLength,
                !allCandidates.isEmpty,
+               !isInPinyinMode(),
+               !buffer.hasPrefix("'"),
                let first = allCandidates.first
             {
                 let text = first.text
@@ -282,7 +290,8 @@ public final class Engine {
             // full-length codes.
             if buffer.count >= config.maxCodeLength,
                allCandidates.isEmpty,
-               !isInPinyinMode()
+               !isInPinyinMode(),
+               !buffer.hasPrefix("'")
             {
                 reset()
                 return .update(state())
@@ -351,10 +360,7 @@ public final class Engine {
                 reset()
                 return .commit(out, state: state())
             }
-            guard let first = topCandidate() else { return .passthrough }
-            let text = first.text
-            reset()
-            return .commit(text, state: state())
+            return selectCandidate(at: highlightedIndex)
 
         case .enter:
             if buffer.isEmpty { return .passthrough }
@@ -371,19 +377,51 @@ public final class Engine {
             reset()
             return .update(state())
 
-        case .pageDown, .arrowDown:
+        case .arrowDown:
+            if allCandidates.isEmpty {
+                if !buffer.isEmpty { return .update(state()) }
+                return .passthrough
+            }
+            let pageSize = config.candidateCount
+            let pageStart = pageIndex * pageSize
+            let pageEnd = min(pageStart + pageSize, allCandidates.count)
+            let pageCandCount = pageEnd - pageStart
+            if highlightedIndex + 1 < pageCandCount {
+                highlightedIndex += 1
+            } else if (pageIndex + 1) * pageSize < allCandidates.count {
+                pageIndex += 1
+                highlightedIndex = 0
+            }
+            return .update(state())
+
+        case .arrowUp:
+            if allCandidates.isEmpty {
+                if !buffer.isEmpty { return .update(state()) }
+                return .passthrough
+            }
+            if highlightedIndex > 0 {
+                highlightedIndex -= 1
+            } else if pageIndex > 0 {
+                pageIndex -= 1
+                let pageStart = pageIndex * config.candidateCount
+                let pageEnd = min(pageStart + config.candidateCount, allCandidates.count)
+                highlightedIndex = (pageEnd - pageStart) - 1
+            }
+            return .update(state())
+
+        case .pageDown:
             if !allCandidates.isEmpty, (pageIndex + 1) * config.candidateCount < allCandidates.count {
                 pageIndex += 1
+                highlightedIndex = 0
                 return .update(state())
             }
-            // At boundary: consume the key (don't let it leak as text)
-            // but keep showing the current state.
             if !buffer.isEmpty { return .update(state()) }
             return .passthrough
 
-        case .pageUp, .arrowUp:
+        case .pageUp:
             if pageIndex > 0 {
                 pageIndex -= 1
+                highlightedIndex = 0
                 return .update(state())
             }
             if !buffer.isEmpty { return .update(state()) }
@@ -396,6 +434,7 @@ public final class Engine {
 
     private func recompute() {
         pageIndex = 0
+        highlightedIndex = 0
         allCandidates = query(buffer)
     }
 
@@ -508,7 +547,7 @@ public final class Engine {
         return EngineState(
             preedit: displayPreedit(),
             candidates: slice,
-            highlightedIndex: 0,
+            highlightedIndex: highlightedIndex,
             pageIndex: page,
             hasPrevPage: page > 0,
             hasNextPage: end < allCandidates.count,

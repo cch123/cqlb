@@ -9,6 +9,7 @@ let package = Package(
         .executable(name: "cqlb-query", targets: ["CqlbQuery"]),
         .executable(name: "cqlb-repl", targets: ["CqlbRepl"]),
         .executable(name: "cqlb", targets: ["CqlbApp"]),
+        .executable(name: "cqlb-ime", targets: ["CqlbIME"]),
         .executable(name: "cqlb-settings", targets: ["CqlbSettings"]),
     ],
     targets: [
@@ -35,6 +36,16 @@ let package = Package(
                 .linkedFramework("ApplicationServices"),
                 .linkedFramework("Carbon"),
                 .linkedFramework("ServiceManagement"),
+            ]
+        ),
+        .executableTarget(
+            name: "CqlbIME",
+            dependencies: ["CqlbCore"],
+            path: "Sources/CqlbIME",
+            linkerSettings: [
+                .linkedFramework("AppKit"),
+                .linkedFramework("InputMethodKit"),
+                .linkedFramework("Carbon"),
             ]
         ),
         .executableTarget(

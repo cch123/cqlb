@@ -7,6 +7,12 @@ import CqlbCore
 /// as its content view (material `.hudWindow`), with the candidate content
 /// view layered on top. This gives a native Liquid-Glass/vibrancy appearance
 /// that blurs whatever's behind the window.
+///
+/// Positioning: in CqlbApp the caret rect was discovered via Accessibility.
+/// Here it's provided by the IMK input controller, which asks the client
+/// directly (`-firstRect(forCharacterRange:actualRange:)`). When the client
+/// returns a zero rect (happens in Terminal, Chrome omnibox, and some
+/// Carbon apps), fallback is screen-center — same as the old behavior.
 final class CandidateWindowController {
     static let shared = CandidateWindowController()
 
@@ -14,8 +20,8 @@ final class CandidateWindowController {
     private let vfx: NSVisualEffectView
     private let view: CandidateView
     private let cornerRadius: CGFloat = 14
-    private var lastSize: NSSize = .zero    // cache mask image
-    private(set) var visible = false         // skip redundant order calls
+    private var lastSize: NSSize = .zero
+    private(set) var visible = false
     private var cachedMask: NSImage?
 
     private init() {
@@ -39,9 +45,6 @@ final class CandidateWindowController {
         vfx.material = .menu
         vfx.blendingMode = .behindWindow
         vfx.state = .active
-        // Use maskImage instead of cornerRadius — this is the Apple-
-        // recommended way to shape NSVisualEffectView and eliminates the
-        // white corner artifacts that layer.cornerRadius leaves behind.
         vfx.maskImage = Self.roundedMask(size: initialFrame.size, radius: cornerRadius)
         vfx.autoresizingMask = [.width, .height]
 
@@ -55,6 +58,11 @@ final class CandidateWindowController {
         self.view = content
     }
 
+    /// Show or update the candidate window.
+    ///
+    /// - Parameter caretRect: the screen-coordinate rect of the client's
+    ///   text input caret (bottom-left origin, Cocoa convention). Pass
+    ///   `.zero` to fall back to screen-center positioning.
     func show(state: EngineState, near caretRect: NSRect) {
         view.update(state: state)
         let size = view.fittingContentSize()
@@ -92,15 +100,10 @@ final class CandidateWindowController {
 
     func hide() {
         guard visible else { return }
-        // alphaValue=0 is near-instant (~0.01ms). orderOut triggers expensive
-        // WindowServer recompositing for NSVisualEffectView (300-500ms spikes).
         window.alphaValue = 0
         visible = false
     }
 
-    /// Build an `NSImage` mask with a rounded-rect hole. When set as
-    /// `NSVisualEffectView.maskImage`, the VFX only draws inside the
-    /// rounded rect — no white corner artifacts.
     private static func roundedMask(size: NSSize, radius: CGFloat) -> NSImage {
         let img = NSImage(size: size, flipped: false) { rect in
             NSColor.black.setFill()
@@ -137,7 +140,6 @@ private final class CandidateView: NSView {
     func update(state: EngineState) {
         self.state = state
         let appearance = EngineHost.shared.currentConfig.appearance
-        // Accent color
         switch appearance.accentColor {
         case .red:    _accentColor = .systemRed
         case .orange: _accentColor = .systemOrange
@@ -146,9 +148,7 @@ private final class CandidateView: NSView {
         case .purple: _accentColor = .systemPurple
         case .teal:   _accentColor = .systemTeal
         }
-        // Layout
         _horizontal = (appearance.layout == .horizontal)
-        // Color scheme — applied on the window
         let panel = self.window
         switch appearance.colorScheme {
         case .system: panel?.appearance = nil
@@ -162,8 +162,6 @@ private final class CandidateView: NSView {
         let textAttr: [NSAttributedString.Key: Any] = [.font: candidateFont]
         let annoAttr: [NSAttributedString.Key: Any] = [.font: annoFont]
         let count = state.candidates.count
-        // Preedit width sets the minimum — important for English phrase mode
-        // where the preedit can be much longer than any candidate.
         let preeditW = (state.preedit as NSString).size(withAttributes: [.font: preeditFont]).width
         let minWidth = max(160, preeditW + hPad * 2 + 16)
         if count == 0 {
@@ -171,7 +169,6 @@ private final class CandidateView: NSView {
         }
 
         if _horizontal {
-            // Mirror drawHorizontal's exact x-advance logic so width matches.
             let idxAttr: [NSAttributedString.Key: Any] = [.font: indexFont]
             var x: CGFloat = hPad
             for (i, c) in state.candidates.enumerated() {
@@ -203,7 +200,6 @@ private final class CandidateView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         var y: CGFloat = vPad
 
-        // ── Preedit line ──
         let preeditAttr: [NSAttributedString.Key: Any] = [
             .font: preeditFont,
             .foregroundColor: _accentColor.withAlphaComponent(0.9),
@@ -214,7 +210,6 @@ private final class CandidateView: NSView {
         )
         y += preeditH
 
-        // Separator line between preedit and candidates.
         let sep = NSBezierPath()
         sep.move(to: NSPoint(x: hPad, y: y))
         sep.line(to: NSPoint(x: bounds.width - hPad, y: y))
@@ -268,7 +263,7 @@ private final class CandidateView: NSView {
                 annoStr.draw(at: NSPoint(x: x + 4, y: y + (rowH - annoH) / 2 + 1), withAttributes: annoAttr)
                 x += annoW + 4
             }
-            x += 12  // gap between candidates
+            x += 12
         }
     }
 
@@ -307,8 +302,6 @@ private final class CandidateView: NSView {
             )
 
             if !c.annotation.isEmpty {
-                // Place anno right after text — one measurement per candidate
-                // (unavoidable for horizontal alignment, but cheaper than before).
                 let tw = textStr.size(withAttributes: textAttr).width
                 let annoAttr: [NSAttributedString.Key: Any] = [
                     .font: annoFont,
