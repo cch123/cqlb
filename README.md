@@ -4,8 +4,8 @@ macOS 超强两笔输入法。最多四键上屏，重码极少。
 
 cqlb 提供两种运行模式，共用同一套引擎、码表与设置应用：
 
-- **外挂模式（当前默认）** — 常驻菜单栏的普通 macOS 应用，通过 `CGEventTap` 全局监听键盘事件，`CGEventPost` 注入文本。不需要在"键盘设置"中添加，只需授予辅助功能权限即可使用。
-- **IME 模式（需 Apple Developer ID）** — 基于 `InputMethodKit` 的系统级输入法。支持**内嵌预编辑**（编码显示在当前文本框内），兼容性最好。代码已完整实现在 `Sources/CqlbIME/`，但由于 macOS 15+/26 要求第三方输入法必须用 Apple Developer ID 证书签名才会被系统加载，自签/ad-hoc 签名的 bundle 会被静默过滤，无法出现在"键盘设置 → 添加输入法"列表中。详见下方"IME 模式构建说明"。
+- **IME 模式（推荐）** — 基于 `InputMethodKit` 的系统级输入法。支持**内嵌预编辑**（编码直接显示在文本框内），兼容性最好，不需要辅助功能权限。需要 Apple Developer ID 证书签名 + 公证。
+- **外挂模式** — 常驻菜单栏的普通 macOS 应用，通过 `CGEventTap` 全局监听键盘事件，`CGEventPost` 注入文本。不需要签名和公证，只需授予辅助功能权限即可使用。
 
 ## 功能特性
 
@@ -37,6 +37,30 @@ cqlb 提供两种运行模式，共用同一套引擎、码表与设置应用：
 
 ```bash
 git clone https://github.com/cch123/cqlb.git && cd cqlb
+```
+
+### IME 模式（推荐）
+
+```bash
+# 1. 在 Makefile 里把 IME_CERT_NAME 改成你自己的 Developer ID
+#    "Developer ID Application: Your Name (TEAMID)"
+# 2. 首次配置公证凭证（一次性）：
+xcrun notarytool store-credentials cqlb-notary \
+    --apple-id "your@apple-id" \
+    --team-id "YOURTEAMID" \
+    --password "xxxx-xxxx-xxxx-xxxx"   # 来自 appleid.apple.com 的 App 专用密码
+
+# 3. 装 IME + 设置应用
+make install          # 同时把设置 app 装到 ~/Applications
+make install-ime      # 装 IME bundle 到 ~/Library/Input Methods
+make notarize-ime     # 提交 Apple 公证 + staple（2-5 分钟，首次可能更久）
+
+# 4. 在 系统设置 → 键盘 → 文本输入 → 输入法 里添加"超强两笔"
+```
+
+### 外挂模式（无需 Developer ID）
+
+```bash
 make install && make run
 ```
 
@@ -55,17 +79,30 @@ make install && make run
 
 ## 工作原理
 
-cqlb 使用 macOS 的 `CGEventTap` API 在全局层面拦截键盘事件：
+两种模式的差异只在输入层，引擎和码表完全共用。
+
+**IME 模式**（`Sources/CqlbIME/`）：
+
+1. **IMKServer 启动** — 系统 `TextInputMenuAgent` 按需拉起 IME 进程
+2. **事件处理** — `IMKInputController.handle(_:client:)` 接收 NSEvent
+3. **编码匹配** — 击键送入引擎，查询超强两笔码表，匹配候选词
+4. **内嵌预编辑** — `client.setMarkedText(_:selectionRange:replacementRange:)` 把编码显示在文本框内
+5. **文本上屏** — `client.insertText(_:replacementRange:)` 提交最终文本
+6. **候选窗口** — 通过 `client.attributes(forCharacterIndex:lineHeightRectangle:)` 拿光标位置，绘制候选窗口
+
+**外挂模式**（`Sources/CqlbApp/`）：
 
 1. **事件监听** — 注册 `cgSessionEventTap`，监听 `.keyDown` 和 `.flagsChanged` 事件
-2. **输入切换** — Option+Space 或 Shift 快速单击切换中/英文模式
-3. **编码匹配** — 击键送入引擎，查询超强两笔码表，匹配候选词
-4. **文本注入** — 选中候选词后，通过 `CGEventPost` 将文本注入当前应用
-5. **候选窗口** — 使用 AppKit 绘制候选窗口，跟随当前光标位置显示
+2. **编码匹配** — 击键送入引擎，查询超强两笔码表，匹配候选词
+3. **文本注入** — 选中候选词后，通过 `CGEventPost` 将文本注入当前应用
+4. **候选窗口** — 通过 Accessibility API 获取光标位置，绘制候选窗口
 
 ## 配置
 
-从菜单栏图标点击 **设置...** 打开设置应用，或直接打开 `cqlb Settings.app`。
+**IME 模式**：菜单栏输入法图标 → **超强两笔 → 设置…**
+**外挂模式**：菜单栏图标 → **设置…**
+
+两种模式的设置都打开同一个 `cqlb Settings.app`，读写同一份配置。
 
 配置文件存储在：
 
@@ -115,59 +152,109 @@ cqlb/
 ## 从源码构建
 
 ```bash
-# 构建外挂模式（debug）
-make build
-# 构建 release 版本
-make build CONFIG=release
+# 构建（debug）
+make build          # 外挂模式 + 设置 app
+make build-ime      # IME 模式
+make build CONFIG=release   # release
 
-# 外挂模式：安装到 ~/Applications/ 并启动
-make install
-make run
+# 安装
+make install        # 外挂模式 → ~/Applications/cqlb.app + cqlb Settings.app
+make install-ime    # IME 模式 → ~/Library/Input Methods/cqlb-ime.app
+make notarize-ime   # 提交 Apple 公证 + staple（IME 模式必需）
 
-# 清理构建产物
+# 清理
 make clean
-
-# 卸载
-make uninstall
+make uninstall       # 外挂
+make uninstall-ime   # IME
 ```
 
 码表文件位于 `Dicts/` 目录，构建时会自动复制到应用 bundle 的 `Resources/Dicts/` 中。
 
-## IME 模式构建说明
+## IME 模式坑点记录
 
-`Sources/CqlbIME/` 下是基于 `InputMethodKit` 的完整实现（`IMKServer` + `IMKInputController`、内嵌预编辑、`firstRect:actualRange:` 光标定位、Option+Space / Shift quick-tap 切中英）。代码已编译通过并可以打包成 IME bundle：
+以下是从实装过程中踩过的坑，记下来给未来自己和 fork 这个仓库的人：
 
-```bash
-make build-ime
-make install-ime       # 装到 ~/Library/Input Methods/cqlb-ime.app
-make uninstall-ime
+### Bundle Identifier 必须含 `.inputmethod.` 作为中间组件
+
+- ✅ `com.cqlb.inputmethod.cqlb`（我们的）
+- ✅ `im.rime.inputmethod.Squirrel`（鼠须管）
+- ✅ `com.apple.inputmethod.SCIM`（Apple 内置）
+- ❌ `com.cqlb.inputmethod`（`inputmethod` 是**最后一段**，被 TextInputMenuAgent 静默过滤）
+
+macOS IME 发现路径按这个 pattern 过滤 bundle——不符合的直接不出现在"键盘设置 → 添加输入法"列表，**没有任何日志提示**。
+
+### 必须 Developer ID 签名 + 公证 + staple
+
+macOS 15+ 上：
+- 自签证书不行（即便导入 System 钥匙串设为 trustRoot+codeSign）
+- ad-hoc 签名不行
+- 只签不公证的 Developer ID bundle 不行（`syspolicy_check` 会直接报 `Notary Ticket Missing Fatal`）
+- 必须走完整的 `codesign + xcrun notarytool submit + xcrun stapler staple` 链路
+
+我们的 Makefile 把这些都串起来了，`make install-ime && make notarize-ime` 一气呵成。
+
+### 名字本地化必须把 TISInputSourceID 作为 key
+
+`Resources/zh-Hans.lproj/InfoPlist.strings` 里除了 `CFBundleName` 还必须加 mode ID 的映射：
+
+```
+"CFBundleName"                       = "超强两笔";
+"com.cqlb.inputmethod.cqlb"          = "超强两笔";
+"com.cqlb.inputmethod.cqlb.Hans"     = "超强两笔";   ← 关键
 ```
 
-**但是在当前 macOS 版本（15+/26）上装完后无法被系统加载。** 实测：
+否则 picker 里会直接显示原始的 `com.cqlb.inputmethod.cqlb.Hans` 字符串。
 
-- bundle 属主、签名、Info.plist 都符合要求，`lsregister` / `TISRegisterInputSource` 都返回成功
-- 然而 `TISCreateInputSourceList` 不列出我们的输入源，"键盘设置 → 添加输入法"里也找不到
-- 即便把自签证书导入 System 钥匙串并设为 "Always Trust / Code Signing"（`scripts/install-ime-trusted.sh`）也无效
-- 已知可用的第三方 IME（如鼠须管 Squirrel）都是 Apple Developer ID 签名，证书链 anchor 到 Apple Root CA
+### InputMethodServerControllerClass 用 Swift module 形式
 
-**要让 IME 模式实际工作，需要：**
+Info.plist 里：
 
-1. 申请 Apple Developer Program（$99/年），拿到 Developer ID Application 证书
-2. 把 `Makefile` 里的 `CERT_NAME` 改成你的证书（形如 `"Developer ID Application: Your Name (TEAMID)"`）
-3. 重新 `make install-ime`
+```xml
+<key>InputMethodServerControllerClass</key>
+<string>CqlbIME.CqlbInputController</string>   ← Module.Class，不加 @objc(name)
+```
 
-将来如果 Apple 放宽策略、或者你有 Developer ID，这条路径随时可以启用。
+Swift 类不标 `@objc(custom_name)`、直接继承 `IMKInputController`，Swift runtime 自动以 `Module.Class` 形式注册到 ObjC runtime。鼠须管、Apple 内置样例都是这个写法。
+
+### Info.plist 其它必要键
+
+- `LSBackgroundOnly=false` + `LSUIElement=true`（两个都要有，前者显式声明"不是纯后台 app，有 UI"）
+- `Contents/PkgInfo` 文件（8 字节 `APPL????`，老式 LaunchServices 探测路径需要）
+- `ComponentInputModeDict`（mode 列表 + visible order）
+- `InputMethodConnectionName = $(PRODUCT_BUNDLE_IDENTIFIER)_Connection`
+
+完整对照参见 [Resources/IME-Info.plist](Resources/IME-Info.plist)。
+
+### IME 菜单 / Fn HUD 图标用 Apple-style TIFF
+
+picker 和按 Fn 弹出的输入法 HUD 都走 TIS 的小图标路径。这里不要复用 app icon。当前采用鼠须管更稳的做法：不设置 `TISIconIsTemplate`，直接提供一张完整的浅色 badge + 深色 glyph。mode 级 `tsInputModeAlternateMenuIconFileKey` 和顶层 `tsInputMethodAlternateIconFileKey` 都指向同一张 `cqlb-label.tiff`；如果给彩色 badge 设置 `TISIconIsTemplate=true`，系统会把浅底和深字压成同一张单色 mask，Fn HUD 里字会被一起染没。
+
+`scripts/gen-tiff.sh` 保留 Apple 内置 IME 的 TIFF 编码形态：RGB+unassociated alpha、LZW、多 rep。`cqlb-label.tiff` 使用鼠须管 `rime.pdf` 同款 22×16 / 44×32 @2x 横向比例。TIS 图标文件名刻意和 app icon 的 `cqlb.icns` 分开，避免 LaunchServices/TextInput UI 按旧 icon URL 缓存。
+
+这次图标问题的定位结论：
+
+- **Fn HUD 空白块**：`TISIconIsTemplate=true` 只能配纯 mask。把“浅底深字”的彩色图声明成 template 后，系统会把浅底和黑字压成同一个单色 mask，选中态里字就一起消失。
+- **白框比系统/鼠须管小**：TIS 不会替第三方 IME 自动扩 badge；`22×16` 画布里留透明 inset，就会直接显示成更小的白框。现在 badge 占满完整画布。
+- **字看起来不居中**：按字体 metrics 居中不等于视觉居中，中文字在小尺寸下有 side bearing 和抗锯齿边缘。生成脚本会先离屏渲染 glyph，扫描真实可见墨迹 bbox，再把 bbox 居中到 badge。
+- **系统缓存很粘**：修改图标时需要同时换清晰的 TIS icon 文件路径、bump `CFBundleVersion`，并重启 `TextInputMenuAgent` / `TextInputSwitcher` / `ControlCenter` / `SystemUIServer` 才能避免旧图继续显示。
+
+### 首次公证可能要几小时
+
+新 Developer 团队的**第一次**公证提交会进 Apple 的 "in-depth analysis" 队列，最慢可能 24-72 小时（[见 Apple Developer Forums](https://developer.apple.com/forums/thread/811968)）。之后同一 Team ID 提交通常 2-5 分钟。
 
 ## 已知限制
 
-外挂模式当前是默认且唯一实际工作的方案，以下限制来源于 `CGEventTap` 的固有特性：
+**外挂模式**：
 
-- **无内嵌预编辑** — 编码显示在独立的候选窗口中，而非应用的文本输入框内。
-- **需要辅助功能权限** — `CGEventTap` 要求辅助功能权限才能工作。每次更新应用后可能需要重新授权。
+- **无内嵌预编辑** — 编码显示在独立的候选窗口中。
+- **需要辅助功能权限** — 每次更新应用后可能需要重新授权。
 - **部分应用不兼容** — 某些使用自定义文本引擎的应用（如部分 Electron 应用）可能无法正确接收注入的文本。
 - **远程桌面兼容性** — 使用远程桌面软件时，modifier key 可能触发意外行为。
 
-前两项在 IME 模式下不存在，但 IME 模式需要 Apple Developer ID 签名（见上文）。
+**IME 模式**：
+
+- 需要 Apple Developer ID（$99/年）做签名和公证。
+- 光标定位依赖 client 实现——少数 Carbon/Terminal 应用不提供 `attributes(forCharacterIndex:)`，候选窗口会回退到屏幕中下方。
 
 ## 致谢
 

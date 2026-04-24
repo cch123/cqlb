@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- 简体中文本地化。XML plist 格式（鼠须管用的也是这种），
+         比旧的 "key" = "value"; 文本格式在 macOS 的某些 UI
+         code path（尤其是 Fn HUD / 部分 launcher）上更可靠。
+         关键：除了 CFBundleName，还把 TIS InputSourceID 作为 key
+         映射到显示名，否则没图标的 UI 会显示原始 ID。 -->
+    <key>CFBundleName</key>
+    <string>超强两笔</string>
+    <key>CFBundleDisplayName</key>
+    <string>超强两笔</string>
+    <key>com.cqlb.inputmethod.cqlb</key>
+    <string>超强两笔</string>
+    <key>com.cqlb.inputmethod.cqlb.Hans</key>
+    <string>超强两笔</string>
+</dict>
+</plist>

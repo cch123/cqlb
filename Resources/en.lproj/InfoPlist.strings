@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>cqlb</string>
+    <key>CFBundleDisplayName</key>
+    <string>cqlb (Super Quick Two-Stroke)</string>
+    <key>com.cqlb.inputmethod.cqlb</key>
+    <string>cqlb</string>
+    <key>com.cqlb.inputmethod.cqlb.Hans</key>
+    <string>cqlb</string>
+</dict>
+</plist>

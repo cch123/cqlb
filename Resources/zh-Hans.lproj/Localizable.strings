@@ -1,0 +1,11 @@
+/* 简体中文通用字符串本地化。
+ * 跟 InfoPlist.strings 互补 —— Localizable.strings 是运行时用 NSLocalizedString
+ * 查的，也被部分系统 UI（如按 Fn 弹出的输入法切换 HUD）读取。 */
+
+/* 品牌名 */
+"cqlb"              = "超强两笔";
+"Super Quick Two-Stroke" = "超强两笔";
+
+/* IME 菜单项 */
+"Settings..."       = "设置…";
+"About cqlb"        = "关于超强两笔";

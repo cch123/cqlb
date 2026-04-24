@@ -6,10 +6,20 @@
     <string>en</string>
     <key>CFBundleExecutable</key>
     <string>cqlb-ime</string>
+    <!-- Keep a classic ICNS around for Finder / older LaunchServices
+         paths. Do not set CFBundleIconName: on macOS 26 System Settings
+         may render third-party IME asset-catalog app icons as oversized
+         app previews in the input-source list. TIS UI gets its small
+         glyph from cqlb-label.tiff below instead. -->
     <key>CFBundleIconFile</key>
-    <string>cqlb.pdf</string>
+    <string>cqlb</string>
+    <!-- Bundle ID must contain "inputmethod" as a NON-terminal path component
+         (e.g. com.foo.inputmethod.bar). macOS's IME discovery path filters
+         bundles that don't match this pattern. All Apple built-ins follow it
+         (com.apple.inputmethod.SCIM, com.apple.inputmethod.Korean, ...) and
+         so does Squirrel (im.rime.inputmethod.Squirrel). -->
     <key>CFBundleIdentifier</key>
-    <string>com.cqlb.inputmethod</string>
+    <string>com.cqlb.inputmethod.cqlb</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
@@ -21,7 +31,7 @@
     <key>CFBundleShortVersionString</key>
     <string>0.1.0</string>
     <key>CFBundleVersion</key>
-    <string>1</string>
+    <string>5</string>
     <key>CFBundleSignature</key>
     <string>????</string>
     <key>CFBundleSupportedPlatforms</key>
@@ -30,34 +40,48 @@
     </array>
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
-    <!-- LSUIElement (not LSBackgroundOnly) — IMEs must be able to present UI
-         (candidate window). LSBackgroundOnly=true makes the system filter
-         us out of the input-source picker. -->
+    <!-- IMEs need to declare: "I'm a background app (no Dock icon) BUT I
+         have UI (candidate window)". Squirrel sets BOTH keys explicitly:
+         LSBackgroundOnly=false + LSUIElement=true. Missing the explicit
+         LSBackgroundOnly=false may cause TextInputMenuAgent to filter us
+         out of the input-source enumeration. -->
+    <key>LSBackgroundOnly</key>
+    <false/>
     <key>LSUIElement</key>
     <true/>
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
 
-    <!-- InputMethodKit configuration -->
+    <!-- InputMethodKit configuration.
+         Values are Swift module-qualified class names (not @objc bare names),
+         matching the pattern used by Apple's IMK samples and Squirrel. -->
     <key>InputMethodServerControllerClass</key>
-    <string>CqlbInputController</string>
+    <string>CqlbIME.CqlbInputController</string>
     <key>InputMethodServerDelegateClass</key>
-    <string>CqlbInputController</string>
+    <string>CqlbIME.CqlbInputController</string>
+    <!-- Connection name convention: $(PRODUCT_BUNDLE_IDENTIFIER)_Connection.
+         On macOS 13.4+, the system may silently fall back to this exact
+         form regardless of what you specify, so it's safest to use it. -->
     <key>InputMethodConnectionName</key>
-    <string>com.cqlb.inputmethod_Connection</string>
+    <string>com.cqlb.inputmethod.cqlb_Connection</string>
 
     <key>ComponentInputModeDict</key>
     <dict>
         <key>tsInputModeListKey</key>
         <dict>
-            <key>com.cqlb.inputmethod.chinese</key>
+            <key>com.cqlb.inputmethod.cqlb.Hans</key>
             <dict>
+                <key>TISIconLabels</key>
+                <dict>
+                    <key>Primary</key>
+                    <string>两</string>
+                </dict>
                 <key>TISInputSourceID</key>
-                <string>com.cqlb.inputmethod.chinese</string>
+                <string>com.cqlb.inputmethod.cqlb.Hans</string>
                 <key>TISIntendedLanguage</key>
                 <string>zh-Hans</string>
                 <key>tsInputModeAlternateMenuIconFileKey</key>
-                <string>cqlb.pdf</string>
+                <string>cqlb-label.tiff</string>
                 <key>tsInputModeCharacterRepertoireKey</key>
                 <array>
                     <string>Hans</string>
@@ -66,10 +90,15 @@
                 <true/>
                 <key>tsInputModeIsVisibleKey</key>
                 <true/>
+                <!-- Match Apple's IME bundles: use a bitmap-backed TIFF
+                     for all TIS menu/palette icons. The system treats
+                     this format as a template image more consistently
+                     than our hand-written PDF in the input-source menu
+                     and picker. -->
                 <key>tsInputModeMenuIconFileKey</key>
-                <string>cqlb.pdf</string>
+                <string>cqlb-label.tiff</string>
                 <key>tsInputModePaletteIconFileKey</key>
-                <string>cqlb.pdf</string>
+                <string>cqlb-label.tiff</string>
                 <!-- Marks this as the primary/canonical mode for its script,
                      which some system UIs use for grouping/selection. -->
                 <key>tsInputModePrimaryInScriptKey</key>
@@ -80,17 +109,24 @@
         </dict>
         <key>tsVisibleInputModeOrderedArrayKey</key>
         <array>
-            <string>com.cqlb.inputmethod.chinese</string>
+            <string>com.cqlb.inputmethod.cqlb.Hans</string>
         </array>
     </dict>
 
+    <!-- Do not set TISIconIsTemplate here. The label icon is already a
+         complete badge with a dark glyph, matching Squirrel's non-template
+         input-source icon approach. If this is marked as a template, the
+         light badge and dark glyph collapse into one mask and the glyph
+         disappears in selected/Fn HUD states. -->
+    <key>tsInputMethodAlternateIconFileKey</key>
+    <string>cqlb-label.tiff</string>
     <key>tsInputMethodIconFileKey</key>
-    <string>cqlb.pdf</string>
+    <string>cqlb-label.tiff</string>
 
     <!-- Top-level TISInputSourceID (Squirrel has this too). Some macOS
          versions use this as the parent identifier when enumerating. -->
     <key>TISInputSourceID</key>
-    <string>com.cqlb.inputmethod</string>
+    <string>com.cqlb.inputmethod.cqlb</string>
     <!-- Caps Lock can toggle between this IME and ABC — matches Squirrel. -->
     <key>TICapsLockLanguageSwitchCapable</key>
     <true/>

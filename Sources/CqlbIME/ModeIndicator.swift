@@ -54,6 +54,10 @@ final class ModeIndicator {
 
     func show(chinese: Bool) {
         hideTimer?.invalidate()
+        // Explicitly follow the current system appearance. NSPanels
+        // without a parent window don't automatically inherit dark mode —
+        // they stick on whatever appearance they had when first shown.
+        window.appearance = NSApp.effectiveAppearance
         label.stringValue = chinese ? "中" : "英"
         label.textColor = chinese ? .systemRed : .labelColor
 

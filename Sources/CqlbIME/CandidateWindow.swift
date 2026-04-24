@@ -151,9 +151,16 @@ private final class CandidateView: NSView {
         _horizontal = (appearance.layout == .horizontal)
         let panel = self.window
         switch appearance.colorScheme {
-        case .system: panel?.appearance = nil
-        case .light:  panel?.appearance = NSAppearance(named: .aqua)
-        case .dark:   panel?.appearance = NSAppearance(named: .darkAqua)
+        case .system:
+            // Active floating panel without a parent window needs an
+            // explicit appearance to pick up system dark-mode —
+            // `nil` (inherit) leaves it stuck on the first appearance
+            // it saw.
+            panel?.appearance = NSApp.effectiveAppearance
+        case .light:
+            panel?.appearance = NSAppearance(named: .aqua)
+        case .dark:
+            panel?.appearance = NSAppearance(named: .darkAqua)
         }
         needsDisplay = true
     }

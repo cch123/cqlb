@@ -12,7 +12,11 @@ import CqlbCore
 ///  - Drive inline preedit (`setMarkedText`) and final commits (`insertText`)
 ///  - Toggle Chinese/English mode (Option+Space, Shift quick-tap)
 ///  - Position the candidate window using the client's own rect
-@objc(CqlbInputController)
+// No @objc(name) annotation: the class inherits from IMKInputController
+// (an @objc class) so Swift auto-exposes it to the ObjC runtime under the
+// module-qualified name `CqlbIME.CqlbInputController`. Info.plist's
+// `InputMethodServerControllerClass` uses that exact string, matching the
+// pattern Apple's IMK samples and Squirrel use.
 final class CqlbInputController: IMKInputController {
 
     // MARK: - Per-controller state
@@ -74,12 +78,71 @@ final class CqlbInputController: IMKInputController {
         return Int(mask)
     }
 
+    // MARK: - IME menu (shown when user picks this IME in the menu-bar switcher)
+
+    /// The system calls this when the user opens the IME's menu from the
+    /// menu-bar input switcher. We surface a single "设置…" entry that
+    /// launches the separate `cqlb Settings.app` (which reads/writes the
+    /// same config.json as this IME).
+    override func menu() -> NSMenu! {
+        let menu = NSMenu()
+
+        let settings = NSMenuItem(
+            title: "设置…",
+            action: #selector(openSettings(_:)),
+            keyEquivalent: ""
+        )
+        settings.target = self
+        menu.addItem(settings)
+
+        menu.addItem(NSMenuItem.separator())
+
+        let about = NSMenuItem(
+            title: "关于超强两笔",
+            action: #selector(openAbout(_:)),
+            keyEquivalent: ""
+        )
+        about.target = self
+        menu.addItem(about)
+
+        return menu
+    }
+
+    @objc private func openSettings(_ sender: Any?) {
+        // Find the Settings bundle by its identifier. NSWorkspace resolves
+        // this against LaunchServices regardless of install path.
+        if let url = NSWorkspace.shared.urlForApplication(
+            withBundleIdentifier: "com.cqlb.settings"
+        ) {
+            NSWorkspace.shared.open(url)
+            return
+        }
+        // Fallback: launch by well-known path under ~/Applications (where
+        // `make install` drops it). If Settings was never installed, show
+        // an alert pointing the user at `make install`.
+        let fallback = URL(fileURLWithPath: (
+            "~/Applications/cqlb Settings.app" as NSString
+        ).expandingTildeInPath)
+        if FileManager.default.fileExists(atPath: fallback.path) {
+            NSWorkspace.shared.open(fallback)
+            return
+        }
+        let alert = NSAlert()
+        alert.messageText = "没找到 cqlb Settings.app"
+        alert.informativeText = "请在 cqlb 源码目录下运行 `make install` 安装设置应用。"
+        alert.runModal()
+    }
+
+    @objc private func openAbout(_ sender: Any?) {
+        if let url = URL(string: "https://github.com/cch123/cqlb") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
     // MARK: - Event handling
 
     override func handle(_ event: NSEvent!, client sender: Any!) -> Bool {
         guard let event = event else { return false }
-
-        Log.imk.log("handle type=\(event.type.rawValue) keyCode=0x\(String(event.keyCode, radix: 16)) flags=0x\(String(event.modifierFlags.rawValue, radix: 16))")
 
         switch event.type {
         case .flagsChanged:
@@ -104,6 +167,11 @@ final class CqlbInputController: IMKInputController {
             shiftWasUsedAsModifier = false
         } else {
             let elapsed = CACurrentMediaTime() - shiftDownTime
+            // Clear the down-time as soon as we see the release — prevents
+            // a second flagsChanged event (e.g. IMK synthesizes one while
+            // the system also delivers one) from re-triggering the toggle
+            // and making it look like Shift was tapped twice.
+            shiftDownTime = 0
             if !shiftWasUsedAsModifier && elapsed < shiftTapThreshold && elapsed > 0.01 {
                 toggleChineseEnglish(client: sender)
             }
@@ -130,18 +198,15 @@ final class CqlbInputController: IMKInputController {
 
         // When in English mode, all keys pass through unchanged.
         if !ModeState.shared.chinese {
-            Log.imk.log("keyDown: English mode, passthrough")
             return false
         }
 
         let key = Self.translate(event)
-        Log.imk.log("keyDown: translated special=\(String(describing: key.special)) char=\(String(describing: key.char)) mods=\(key.modifiers.rawValue)")
         let engine = EngineHost.shared.engine
         let result = engine.processKey(key)
 
         switch result {
         case .passthrough:
-            Log.imk.log("keyDown: result=passthrough")
             let s = engine.currentState()
             if s.preedit.isEmpty && s.candidates.isEmpty {
                 CandidateWindowController.shared.hide()
@@ -150,12 +215,10 @@ final class CqlbInputController: IMKInputController {
             return false
 
         case .update(let state):
-            Log.imk.log("keyDown: result=update highlighted=\(state.highlightedIndex) cands=\(state.candidates.count) preedit=\"\(state.preedit)\"")
             updateUI(state: state, client: sender)
             return true
 
         case .commit(let text, let state):
-            Log.imk.log("keyDown: result=commit text=\"\(text)\"")
             commit(text, to: sender)
             updateUI(state: state, client: sender)
             return true
@@ -214,17 +277,55 @@ final class CqlbInputController: IMKInputController {
     }
 
     /// Ask the client for the screen-coordinate rect of the marked text's
-    /// first character. Returns `.zero` if the client doesn't support this
-    /// (some Carbon / Electron apps); the candidate window falls back to
-    /// screen-center in that case.
+    /// insertion point. Tries two IMK APIs in order:
+    ///
+    /// 1. `attributes(forCharacterIndex:lineHeightRectangle:)` — preferred
+    ///    by Apple's sample code; returns a rect describing the full line
+    ///    height at the caret. Most apps (TextEdit, Safari, Chrome, etc.)
+    ///    implement this correctly.
+    /// 2. `firstRect(forCharacterRange:actualRange:)` — older NSTextInput
+    ///    API; more widely supported but returns zero rect on some apps
+    ///    when the range is entirely inside marked text.
+    ///
+    /// Returns `.zero` if both fail (rare — usually Terminal or Carbon
+    /// apps). The candidate window falls back to screen-center in that
+    /// case.
     private func clientCaretRect(_ sender: Any!, markedLength: Int) -> NSRect {
         guard let client = sender as? IMKTextInput else { return .zero }
-        let range = NSRange(location: 0, length: markedLength)
+
+        // Attempt 1: attributes(forCharacterIndex:lineHeightRectangle:).
+        // The index is 0 because IMK marked text is always at index 0 of
+        // the composition range from the client's perspective.
+        var lineRect = NSRect.zero
+        _ = client.attributes(forCharacterIndex: 0, lineHeightRectangle: &lineRect)
+        if isUsable(lineRect) {
+            return lineRect
+        }
+
+        // Attempt 2: firstRect(forCharacterRange:actualRange:). Use a
+        // 1-character range at the start of the marked text — some clients
+        // return zero rect for zero-length ranges.
+        let probeLen = max(1, markedLength)
+        let range = NSRange(location: 0, length: probeLen)
         var actual = NSRange(location: NSNotFound, length: 0)
-        let rect = client.firstRect(forCharacterRange: range, actualRange: &actual)
-        // Bogus values seen in practice: NaN width/height on misbehaving clients.
-        if rect.size.width.isNaN || rect.size.height.isNaN { return .zero }
-        return rect
+        let firstRect = client.firstRect(forCharacterRange: range, actualRange: &actual)
+        if isUsable(firstRect) {
+            return firstRect
+        }
+
+        // Both APIs returned bogus — typical in Terminal and some Carbon
+        // apps. CandidateWindow will fall back to screen-center.
+        return .zero
+    }
+
+    /// A rect is "usable" as a caret position if it has non-NaN values and
+    /// isn't pinned at the screen origin (which most apps use as "I don't
+    /// know" sentinel).
+    private func isUsable(_ rect: NSRect) -> Bool {
+        if rect.size.width.isNaN || rect.size.height.isNaN { return false }
+        if rect.origin.x.isNaN || rect.origin.y.isNaN { return false }
+        if rect.origin.x == 0 && rect.origin.y == 0 { return false }
+        return true
     }
 
     // MARK: - Mode toggle
