@@ -9,7 +9,8 @@
 #     template rendering flattens the badge and glyph into one mask.
 #   - The glyph is centered by scanning its actual rasterized ink bounds,
 #     not by trusting font metrics. CJK glyph metrics include side bearings
-#     that are visually off-center at this tiny size.
+#     that are visually off-center at this tiny size. A tiny optical y-offset
+#     then lowers "两" because its visual weight sits in the top half.
 #   - Uses Squirrel-like 22×16 plus 44×32 @2x proportions.
 #   - TIFF built by tiffutil, yielding unassociated alpha + LZW compression
 # Keeping the resource to the small reps matters on macOS 26: the input
@@ -163,7 +164,8 @@ for (outURL, pixelWidth, pixelHeight) in outputs {
         let targetCenterX = CGFloat(pixelWidth) / 2
         let targetCenterY = CGFloat(pixelHeight) / 2
         let shiftX = Int((targetCenterX - inkCenterX).rounded())
-        let shiftY = Int((targetCenterY - inkCenterY).rounded())
+        let opticalShiftY = max(1, pixelHeight / 16)
+        let shiftY = Int((targetCenterY - inkCenterY).rounded()) + opticalShiftY
 
         for y in 0..<pixelHeight {
             for x in 0..<pixelWidth {

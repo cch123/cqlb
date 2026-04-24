@@ -258,7 +258,7 @@ let rect = client.firstRect(forCharacterRange: range, actualRange: &actual)
 
 - 尺寸只放 `22×16` 和 `44×32 @2x`，避免 Fn HUD 拿到大 app icon rep 后乱缩放。
 - 白色 badge 占满完整 `22×16` 画布；一旦留透明 inset，就会比 Apple / Squirrel 的输入法图标小一圈。
-- "两"字不是用字体 metrics 居中，而是先离屏渲染，扫描真实可见墨迹 bbox，再把 bbox 居中。小尺寸中文 glyph 的 side bearing 和抗锯齿会让 metrics 居中看起来偏。
+- "两"字不是用字体 metrics 居中，而是先离屏渲染，扫描真实可见墨迹 bbox，再把 bbox 居中。小尺寸中文 glyph 的 side bearing 和抗锯齿会让 metrics 居中看起来偏；最终还要加 1px 的 optical y-offset，把视觉重心偏上的“两”略微下移。
 - 改图标时要 bump `CFBundleVersion`，必要时重启 `TextInputMenuAgent` / `TextInputSwitcher` / `ControlCenter` / `SystemUIServer`，否则系统会继续吃旧缓存。
 
 ### 6.4 IME 菜单入口
