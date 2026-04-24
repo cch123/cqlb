@@ -302,10 +302,12 @@ final class CqlbInputController: IMKInputController {
             return lineRect
         }
 
-        // Attempt 2: firstRect(forCharacterRange:actualRange:). Use a
-        // 1-character range at the start of the marked text — some clients
-        // return zero rect for zero-length ranges.
-        let probeLen = max(1, markedLength)
+        // Attempt 2: firstRect(forCharacterRange:actualRange:). For marked
+        // text, use a 1-character range because some clients return zero for
+        // zero-length marked ranges. With no marked text, a zero-length range
+        // asks for the insertion caret itself, which is what mode switching
+        // needs.
+        let probeLen = markedLength > 0 ? max(1, markedLength) : 0
         let range = NSRange(location: 0, length: probeLen)
         var actual = NSRange(location: NSNotFound, length: 0)
         let firstRect = client.firstRect(forCharacterRange: range, actualRange: &actual)
@@ -334,9 +336,13 @@ final class CqlbInputController: IMKInputController {
         // Before switching out of Chinese mode, commit any pending preedit
         // so the user's in-flight text isn't silently dropped.
         let engine = EngineHost.shared.engine
+        let stateBeforeToggle = engine.currentState()
+        let caret = clientCaretRect(
+            sender,
+            markedLength: (stateBeforeToggle.preedit as NSString).length
+        )
         if ModeState.shared.chinese {
-            let state = engine.currentState()
-            if !state.preedit.isEmpty, let first = state.candidates.first {
+            if !stateBeforeToggle.preedit.isEmpty, let first = stateBeforeToggle.candidates.first {
                 commit(first.text, to: sender)
             } else {
                 clearMarkedText(client: sender)
@@ -345,7 +351,7 @@ final class CqlbInputController: IMKInputController {
             CandidateWindowController.shared.hide()
         }
         ModeState.shared.chinese.toggle()
-        ModeIndicator.shared.show(chinese: ModeState.shared.chinese)
+        ModeIndicator.shared.show(chinese: ModeState.shared.chinese, near: caret)
     }
 
     // MARK: - NSEvent → KeyEvent

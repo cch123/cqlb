@@ -1,7 +1,7 @@
 import AppKit
 
 /// Shows a brief floating indicator when switching between Chinese / English
-/// mode. Appears at screen center, fades out after ~0.8 seconds.
+/// mode. Appears near the active text caret, fades out after ~0.8 seconds.
 final class ModeIndicator {
     static let shared = ModeIndicator()
 
@@ -52,7 +52,7 @@ final class ModeIndicator {
         self.label = tf
     }
 
-    func show(chinese: Bool) {
+    func show(chinese: Bool, near caretRect: NSRect = .zero) {
         hideTimer?.invalidate()
         // Explicitly follow the current system appearance. NSPanels
         // without a parent window don't automatically inherit dark mode —
@@ -61,10 +61,10 @@ final class ModeIndicator {
         label.stringValue = chinese ? "中" : "英"
         label.textColor = chinese ? .systemRed : .labelColor
 
-        let screen = NSScreen.main ?? NSScreen.screens.first!
-        let x = screen.frame.midX - window.frame.width / 2
-        let y = screen.frame.midY - window.frame.height / 2 + 120
-        window.setFrameOrigin(NSPoint(x: x, y: y))
+        let screen = Self.screen(containing: caretRect)
+            ?? NSScreen.main
+            ?? NSScreen.screens.first!
+        window.setFrameOrigin(Self.origin(near: caretRect, in: screen.visibleFrame, size: window.frame.size))
         window.alphaValue = 1.0
         window.orderFrontRegardless()
 
@@ -76,5 +76,52 @@ final class ModeIndicator {
                 self?.window.orderOut(nil)
             }
         }
+    }
+
+    private static func screen(containing rect: NSRect) -> NSScreen? {
+        guard isUsable(rect) else { return nil }
+        let point = NSPoint(x: rect.midX, y: rect.midY)
+        return NSScreen.screens.first { $0.frame.contains(point) }
+            ?? NSScreen.screens.first { $0.frame.intersects(rect) }
+    }
+
+    private static func origin(near caretRect: NSRect, in screenFrame: NSRect, size: NSSize) -> NSPoint {
+        let margin: CGFloat = 8
+
+        guard isUsable(caretRect) else {
+            return NSPoint(
+                x: screenFrame.midX - size.width / 2,
+                y: screenFrame.midY - size.height / 2 + 120
+            )
+        }
+
+        var origin = NSPoint(
+            x: caretRect.midX - size.width / 2,
+            y: caretRect.minY - size.height - margin
+        )
+
+        if origin.y < screenFrame.minY + margin {
+            origin.y = caretRect.maxY + margin
+        }
+        if origin.x + size.width > screenFrame.maxX - margin {
+            origin.x = screenFrame.maxX - size.width - margin
+        }
+        if origin.x < screenFrame.minX + margin {
+            origin.x = screenFrame.minX + margin
+        }
+        if origin.y + size.height > screenFrame.maxY - margin {
+            origin.y = screenFrame.maxY - size.height - margin
+        }
+        if origin.y < screenFrame.minY + margin {
+            origin.y = screenFrame.minY + margin
+        }
+        return origin
+    }
+
+    private static func isUsable(_ rect: NSRect) -> Bool {
+        if rect.origin.x.isNaN || rect.origin.y.isNaN { return false }
+        if rect.size.width.isNaN || rect.size.height.isNaN { return false }
+        if rect.origin.x == 0 && rect.origin.y == 0 && rect.size == .zero { return false }
+        return true
     }
 }
