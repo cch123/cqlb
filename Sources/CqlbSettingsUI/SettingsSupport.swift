@@ -61,8 +61,7 @@ public final class SettingsWindowPresenter: NSObject, NSWindowDelegate {
 
     public func show(onSave: (() -> Void)? = nil) {
         if let window {
-            window.makeKeyAndOrderFront(nil)
-            NSApp.activate(ignoringOtherApps: true)
+            present(window)
             return
         }
 
@@ -79,8 +78,18 @@ public final class SettingsWindowPresenter: NSObject, NSWindowDelegate {
         window.center()
 
         self.window = window
-        window.makeKeyAndOrderFront(nil)
+        present(window)
+    }
+
+    private func present(_ window: NSWindow) {
         NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+        // IME bundles are LSUIElement/accessory apps. In that process class,
+        // makeKeyAndOrderFront can leave a newly created settings window
+        // behind the current text client; orderFrontRegardless makes the
+        // menu command visibly deterministic without changing the IME into
+        // a separate foreground app.
+        window.orderFrontRegardless()
     }
 
     public func windowWillClose(_ notification: Notification) {

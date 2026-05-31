@@ -94,7 +94,6 @@ final class CqlbInputController: IMKInputController {
             action: #selector(openSettings(_:)),
             keyEquivalent: ""
         )
-        settings.target = self
         menu.addItem(settings)
 
         menu.addItem(NSMenuItem.separator())
@@ -104,22 +103,46 @@ final class CqlbInputController: IMKInputController {
             action: #selector(openAbout(_:)),
             keyEquivalent: ""
         )
-        about.target = self
         menu.addItem(about)
 
         return menu
     }
 
-    @MainActor
-    @objc private func openSettings(_ sender: Any?) {
-        SettingsWindowPresenter.shared.show {
-            EngineHost.shared.forceReloadConfig()
+    /// IMK menu commands are not normal AppKit target/action dispatch. The
+    /// system calls this method with the menu item's selector, and older IMK
+    /// default dispatch can silently miss Swift actor-isolated actions. Route
+    /// commands explicitly so Settings keeps working when invoked from the
+    /// menu-bar input switcher.
+    override func doCommand(by selector: Selector!, command info: [AnyHashable : Any]!) {
+        guard let selector else { return }
+        Log.imk.log("menu command \(NSStringFromSelector(selector))")
+
+        if selector == #selector(openSettings(_:)) {
+            openSettings(info)
+        } else if selector == #selector(openAbout(_:)) {
+            openAbout(info)
+        } else {
+            super.doCommand(by: selector, command: info)
         }
     }
 
-    @objc private func openAbout(_ sender: Any?) {
-        if let url = URL(string: "https://github.com/cch123/cqlb") {
-            NSWorkspace.shared.open(url)
+    @objc(openSettings:)
+    func openSettings(_ sender: Any?) {
+        Log.imk.log("open settings requested")
+        Task { @MainActor in
+            SettingsWindowPresenter.shared.show {
+                EngineHost.shared.forceReloadConfig()
+            }
+        }
+    }
+
+    @objc(openAbout:)
+    func openAbout(_ sender: Any?) {
+        Log.imk.log("open about requested")
+        Task { @MainActor in
+            if let url = URL(string: "https://github.com/cch123/cqlb") {
+                NSWorkspace.shared.open(url)
+            }
         }
     }
 
