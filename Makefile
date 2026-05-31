@@ -40,7 +40,7 @@ export CLANG_MODULE_CACHE_PATH
 DICT_FILES   := cqlb.dict.yaml cqlb.src.dict.yaml ipinyin.dict.yaml \
                 english.dict.yaml emoji_word.txt emoji_category.txt
 
-.PHONY: build install clean uninstall build-ime install-ime notarize-ime package-ime pkg-ime package-installer uninstall-ime
+.PHONY: build install clean uninstall build-ime bundle-ime install-ime notarize-ime package-ime pkg-ime package-installer uninstall-ime
 
 build: build-ime
 
@@ -61,7 +61,7 @@ build-ime:
 	@mkdir -p "$(CLANG_MODULE_CACHE_PATH)"
 	$(SWIFT) build $(BUILD_FLAG) --product cqlb-ime
 
-install-ime: build-ime
+bundle-ime: build-ime
 	@echo "==> generating icons"
 	@# IME menu / picker icons use TIFF, matching Apple's built-in input
 	@# methods. The app icon remains ICNS for Finder/LaunchServices paths.
@@ -102,6 +102,8 @@ install-ime: build-ime
 		--entitlements "$(IME_ENTITLEMENTS)" \
 		--timestamp "$(IME_BUNDLE)"
 	@codesign --verify --strict --verbose=2 "$(IME_BUNDLE)"
+
+install-ime: bundle-ime
 	@mkdir -p "$(IME_INSTALL_DIR)"
 	@# The system launches the IME bundle on demand via TextInputMenuAgent.
 	@# We have to kill the running instance before overwriting — the agent
@@ -130,29 +132,32 @@ install-ime: build-ime
 	@echo "Settings are available from the input switcher menu while cqlb is active."
 
 notarize-ime:
-	@# Submit the installed bundle to Apple's notary service and staple
-	@# the resulting ticket back to it. Must be run AFTER install-ime.
+	@# Submit the staged bundle to Apple's notary service and staple the
+	@# resulting ticket back to it. Packaging intentionally avoids installing
+	@# to ~/Library/Input Methods; installing a temporary per-user copy leaves
+	@# stale TIS/LaunchServices cache entries that can stop the /Library pkg
+	@# payload from launching after installation.
 	@# Takes 2–15 minutes typically; progress is streamed by notarytool.
-	@test -d "$(IME_INSTALL_DIR)/cqlb-ime.app" \
-		|| { echo "error: $(IME_INSTALL_DIR)/cqlb-ime.app not found — run 'make install-ime' first"; exit 1; }
+	@test -d "$(IME_BUNDLE)" \
+		|| { echo "error: $(IME_BUNDLE) not found — run 'make bundle-ime' first"; exit 1; }
 	@echo "==> zipping bundle for submission"
 	@rm -f "$(IME_NOTARY_ZIP)" "$(IME_DIST_ZIP)"
-	@ditto -c -k --keepParent "$(IME_INSTALL_DIR)/cqlb-ime.app" "$(IME_NOTARY_ZIP)"
+	@ditto -c -k --keepParent "$(IME_BUNDLE)" "$(IME_NOTARY_ZIP)"
 	@echo "==> submitting to Apple notary service (this can take a while)"
 	@xcrun notarytool submit "$(IME_NOTARY_ZIP)" \
 		--keychain-profile "$(NOTARY_PROFILE)" \
 		--wait
-	@echo "==> stapling ticket to installed bundle"
-	@xcrun stapler staple "$(IME_INSTALL_DIR)/cqlb-ime.app"
+	@echo "==> stapling ticket to staged bundle"
+	@xcrun stapler staple "$(IME_BUNDLE)"
 	@echo "==> validating stapled notarization ticket"
-	@xcrun stapler validate "$(IME_INSTALL_DIR)/cqlb-ime.app"
-	@codesign --verify --strict --verbose=2 -R="notarized" "$(IME_INSTALL_DIR)/cqlb-ime.app"
+	@xcrun stapler validate "$(IME_BUNDLE)"
+	@codesign --verify --strict --verbose=2 -R="notarized" "$(IME_BUNDLE)"
 	@echo "==> refreshing LaunchServices"
 	@/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister \
-		-f "$(IME_INSTALL_DIR)/cqlb-ime.app" >/dev/null
+		-f "$(IME_BUNDLE)" >/dev/null
 	@killall TextInputMenuAgent 2>/dev/null || true
 	@echo "==> creating distributable zip"
-	@ditto -c -k --keepParent "$(IME_INSTALL_DIR)/cqlb-ime.app" "$(IME_DIST_ZIP)"
+	@ditto -c -k --keepParent "$(IME_BUNDLE)" "$(IME_DIST_ZIP)"
 	@echo ""
 	@echo "notarization complete. Distributable archive:"
 	@echo "  $(IME_DIST_ZIP)"
@@ -161,20 +166,20 @@ notarize-ime:
 	@echo "Text Input → Input Sources → + and look for 超强两笔."
 
 package-ime:
-	@$(MAKE) CONFIG=release install-ime
+	@$(MAKE) CONFIG=release bundle-ime
 	@$(MAKE) CONFIG=release notarize-ime
 
 pkg-ime:
-	@test -d "$(IME_INSTALL_DIR)/cqlb-ime.app" \
-		|| { echo "error: $(IME_INSTALL_DIR)/cqlb-ime.app not found — run 'make package-ime' first"; exit 1; }
-	@echo "==> validating installed IME before packaging"
-	@xcrun stapler validate "$(IME_INSTALL_DIR)/cqlb-ime.app"
-	@codesign --verify --strict --verbose=2 -R="notarized" "$(IME_INSTALL_DIR)/cqlb-ime.app"
+	@test -d "$(IME_BUNDLE)" \
+		|| { echo "error: $(IME_BUNDLE) not found — run 'make package-ime' first"; exit 1; }
+	@echo "==> validating staged IME before packaging"
+	@xcrun stapler validate "$(IME_BUNDLE)"
+	@codesign --verify --strict --verbose=2 -R="notarized" "$(IME_BUNDLE)"
 	@echo "==> staging pkg payload"
 	@rm -rf "$(PKG_ROOT)" "$(PKG_UNSIGNED)" "$(PKG_DIST)"
 	@mkdir -p "$(PKG_ROOT)/Library/Input Methods"
 	@COPYFILE_DISABLE=1 ditto --norsrc --noextattr --noqtn \
-		"$(IME_INSTALL_DIR)/cqlb-ime.app" \
+		"$(IME_BUNDLE)" \
 		"$(PKG_ROOT)/Library/Input Methods/cqlb-ime.app"
 	@find "$(PKG_ROOT)" -name ".DS_Store" -delete
 	@xattr -cr "$(PKG_ROOT)" 2>/dev/null || true

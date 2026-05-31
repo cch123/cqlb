@@ -56,10 +56,13 @@ public final class SettingsWindowPresenter: NSObject, NSWindowDelegate {
     public static let shared = SettingsWindowPresenter()
 
     private var window: NSWindow?
+    private var restoreAccessoryPolicyOnClose = false
 
     private override init() {}
 
     public func show(onSave: (() -> Void)? = nil) {
+        prepareForForegroundWindow()
+
         if let window {
             present(window)
             return
@@ -67,13 +70,23 @@ public final class SettingsWindowPresenter: NSObject, NSWindowDelegate {
 
         let content = SettingsContentView(onSave: onSave)
         let hostingController = NSHostingController(rootView: content)
-        let window = NSWindow(contentViewController: hostingController)
+        // Avoid NSWindow(contentViewController:): on macOS 26, an IME process
+        // can crash inside AppKit's private title binding setup for that
+        // convenience initializer. Creating the window first and assigning the
+        // controller afterward bypasses the binding path while keeping the
+        // same visible window behavior.
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 780, height: 560),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentViewController = hostingController
         window.title = "超强两笔 · 设置"
-        window.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
         window.minSize = NSSize(width: 780, height: 560)
         window.setContentSize(NSSize(width: 780, height: 560))
         window.isReleasedWhenClosed = false
-        window.collectionBehavior = [.moveToActiveSpace]
+        window.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
         window.delegate = self
         window.center()
 
@@ -81,18 +94,34 @@ public final class SettingsWindowPresenter: NSObject, NSWindowDelegate {
         present(window)
     }
 
+    private func prepareForForegroundWindow() {
+        guard NSApp.activationPolicy() != .regular else { return }
+
+        // The IME normally runs as an accessory LSUIElement process. That is
+        // correct for typing, but normal NSWindow presentation from an IME
+        // menu is unreliable while the process cannot become a regular
+        // foreground app. Promote only while Settings is open; closing the
+        // window restores the input method to accessory mode.
+        restoreAccessoryPolicyOnClose = true
+        NSApp.setActivationPolicy(.regular)
+    }
+
     private func present(_ window: NSWindow) {
+        NSRunningApplication.current.activate(options: [.activateAllWindows])
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
-        // IME bundles are LSUIElement/accessory apps. In that process class,
-        // makeKeyAndOrderFront can leave a newly created settings window
-        // behind the current text client; orderFrontRegardless makes the
-        // menu command visibly deterministic without changing the IME into
-        // a separate foreground app.
+        // Even after activation, IME windows can be ordered behind the text
+        // client that triggered the menu. Force ordering after makeKey so the
+        // menu command has a deterministic visible result.
         window.orderFrontRegardless()
+        window.makeMain()
     }
 
     public func windowWillClose(_ notification: Notification) {
         window = nil
+        if restoreAccessoryPolicyOnClose {
+            restoreAccessoryPolicyOnClose = false
+            NSApp.setActivationPolicy(.accessory)
+        }
     }
 }

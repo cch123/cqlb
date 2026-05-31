@@ -56,14 +56,15 @@ make package-ime
 make pkg-ime
 ```
 
-`make package-ime` 会执行 release 构建、Developer ID 签名、安装到
-`~/Library/Input Methods`、提交 Apple 公证、staple、验证，并生成：
+`make package-ime` 会执行 release 构建、Developer ID 签名、提交 Apple
+公证、staple、验证，并生成：
 
 ```
 dist/cqlb-ime-notarized.zip
 ```
 
-`make pkg-ime` 会把当前已公证并 staple 的 IME 打成安装包：
+`make pkg-ime` 会把 `dist/cqlb-ime.app` 里当前已公证并 staple 的 IME
+打成安装包：
 
 ```
 dist/cqlb-ime-installer.pkg
@@ -146,8 +147,8 @@ cqlb/
 make build                 # debug 构建 cqlb-ime
 make install               # debug 构建并安装到 ~/Library/Input Methods
 make install CONFIG=release
-make package-ime           # release + install + notarize + zip
-make pkg-ime               # 从已公证的 IME 生成 pkg 安装包
+make package-ime           # release + notarize + zip，不写入 ~/Library
+make pkg-ime               # 从 dist 中已公证的 IME 生成 pkg 安装包
 make package-installer     # release + notarize + zip + pkg
 make clean
 make uninstall             # 删除 ~/Library/Input Methods/cqlb-ime.app
@@ -170,12 +171,12 @@ macOS IME 发现路径会过滤不符合 `.inputmethod.<suffix>` 形态的 bundl
 ### 必须 Developer ID 签名 + 公证 + staple
 
 macOS 15+ 上，第三方 IME 需要完整的 Developer ID 签名、公证和 stapled
-ticket。Makefile 会在 `install-ime` 阶段做签名校验，在 `notarize-ime`
+ticket。Makefile 会在 `bundle-ime` 阶段做签名校验，在 `notarize-ime`
 阶段做：
 
 ```bash
-xcrun stapler validate ~/Library/Input\ Methods/cqlb-ime.app
-codesign --verify --strict -R="notarized" ~/Library/Input\ Methods/cqlb-ime.app
+xcrun stapler validate dist/cqlb-ime.app
+codesign --verify --strict -R="notarized" dist/cqlb-ime.app
 ```
 
 ### 名字本地化必须把 TISInputSourceID 作为 key

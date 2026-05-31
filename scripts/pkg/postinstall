@@ -24,15 +24,40 @@ if [ -d "$IME" ]; then
   "$LSREGISTER" -f "$IME" >/dev/null 2>&1 || true
 fi
 
+if [ -n "$CONSOLE_USER" ] && [ "$CONSOLE_USER" != "root" ]; then
+  killall -u "$CONSOLE_USER" cqlb-ime >/dev/null 2>&1 || true
+else
+  killall cqlb-ime >/dev/null 2>&1 || true
+fi
+
 # These UI processes aggressively cache TIS/LaunchServices state. Restarting
 # the current user's copies makes the newly installed /Library input method
 # appear in the menu bar, Fn HUD, and System Settings without a logout.
 for PROC in TextInputMenuAgent TextInputSwitcher ControlCenter SystemUIServer; do
   if [ -n "$CONSOLE_USER" ] && [ "$CONSOLE_USER" != "root" ]; then
-    killall -u "$CONSOLE_USER" "$PROC" >/dev/null 2>&1 || true
+    if [ "$PROC" = "TextInputSwitcher" ]; then
+      killall -KILL -u "$CONSOLE_USER" "$PROC" >/dev/null 2>&1 || true
+    else
+      killall -u "$CONSOLE_USER" "$PROC" >/dev/null 2>&1 || true
+    fi
   else
-    killall "$PROC" >/dev/null 2>&1 || true
+    if [ "$PROC" = "TextInputSwitcher" ]; then
+      killall -KILL "$PROC" >/dev/null 2>&1 || true
+    else
+      killall "$PROC" >/dev/null 2>&1 || true
+    fi
   fi
 done
+
+# Start the newly installed system copy in the console user's launch session.
+# Without this, macOS can keep a stale per-user IME path cached until the next
+# input-source switch or logout, which looks like "the icon exists but keys do
+# nothing".
+if [ -n "$CONSOLE_USER" ] && [ "$CONSOLE_USER" != "root" ]; then
+  CONSOLE_UID="$(/usr/bin/id -u "$CONSOLE_USER" 2>/dev/null || true)"
+  if [ -n "$CONSOLE_UID" ]; then
+    /bin/launchctl asuser "$CONSOLE_UID" /usr/bin/open -g "$IME" >/dev/null 2>&1 || true
+  fi
+fi
 
 exit 0

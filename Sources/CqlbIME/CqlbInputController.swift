@@ -87,22 +87,32 @@ final class CqlbInputController: IMKInputController {
     /// distributable IME bundle does not depend on a second app being
     /// installed beside it.
     override func menu() -> NSMenu! {
+        Log.imk.log("menu requested")
         let menu = NSMenu()
+        menu.autoenablesItems = false
 
         let settings = NSMenuItem(
             title: "设置…",
-            action: #selector(openSettings(_:)),
+            action: #selector(openSettingsMenuItem),
             keyEquivalent: ""
         )
+        // macOS 26 may dispatch IMK menu items as ordinary AppKit
+        // target/action instead of routing through doCommand(by:command:).
+        // Keep the target explicit, while doCommand below covers the classic
+        // IMK command path.
+        settings.target = self
+        settings.isEnabled = true
         menu.addItem(settings)
 
         menu.addItem(NSMenuItem.separator())
 
         let about = NSMenuItem(
             title: "关于超强两笔",
-            action: #selector(openAbout(_:)),
+            action: #selector(openAboutMenuItem),
             keyEquivalent: ""
         )
+        about.target = self
+        about.isEnabled = true
         menu.addItem(about)
 
         return menu
@@ -117,29 +127,45 @@ final class CqlbInputController: IMKInputController {
         guard let selector else { return }
         Log.imk.log("menu command \(NSStringFromSelector(selector))")
 
-        if selector == #selector(openSettings(_:)) {
+        if selector == #selector(openSettingsMenuItem) || selector == #selector(openSettings(_:)) {
             openSettings(info)
-        } else if selector == #selector(openAbout(_:)) {
+        } else if selector == #selector(openAboutMenuItem) || selector == #selector(openAbout(_:)) {
             openAbout(info)
         } else {
             super.doCommand(by: selector, command: info)
         }
     }
 
+    @objc
+    func openSettingsMenuItem() {
+        openSettings(nil)
+    }
+
     @objc(openSettings:)
     func openSettings(_ sender: Any?) {
         Log.imk.log("open settings requested")
-        Task { @MainActor in
+        // Menu commands arrive while TextInputMenuAgent is still tracking the
+        // status-item menu. Presenting immediately can create the window while
+        // the menu is tearing down, leaving it ordered behind the active text
+        // client. Defer one run-loop turn so the settings window can become
+        // key reliably.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            Log.imk.log("present settings window")
             SettingsWindowPresenter.shared.show {
                 EngineHost.shared.forceReloadConfig()
             }
         }
     }
 
+    @objc
+    func openAboutMenuItem() {
+        openAbout(nil)
+    }
+
     @objc(openAbout:)
     func openAbout(_ sender: Any?) {
         Log.imk.log("open about requested")
-        Task { @MainActor in
+        DispatchQueue.main.async {
             if let url = URL(string: "https://github.com/cch123/cqlb") {
                 NSWorkspace.shared.open(url)
             }
