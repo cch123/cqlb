@@ -26,7 +26,7 @@ struct AboutView: View {
             }
 
             GlassPanel("关于") {
-                Text("基于 Rime 的超强两笔码表,使用 Option+Space 切换中英文的外挂式 macOS 输入法。通过 CGEventTap 捕获键盘事件、Accessibility 权限注入文本。")
+                Text("基于超强两笔码表的标准 macOS 输入法。通过 InputMethodKit 接入系统输入源,支持内嵌预编辑和候选窗口。")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }

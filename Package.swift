@@ -6,11 +6,10 @@ let package = Package(
     platforms: [.macOS(.v14)],
     products: [
         .library(name: "CqlbCore", targets: ["CqlbCore"]),
+        .library(name: "CqlbSettingsUI", targets: ["CqlbSettingsUI"]),
         .executable(name: "cqlb-query", targets: ["CqlbQuery"]),
         .executable(name: "cqlb-repl", targets: ["CqlbRepl"]),
-        .executable(name: "cqlb", targets: ["CqlbApp"]),
         .executable(name: "cqlb-ime", targets: ["CqlbIME"]),
-        .executable(name: "cqlb-settings", targets: ["CqlbSettings"]),
     ],
     targets: [
         .target(
@@ -28,19 +27,8 @@ let package = Package(
             path: "Sources/CqlbRepl"
         ),
         .executableTarget(
-            name: "CqlbApp",
-            dependencies: ["CqlbCore"],
-            path: "Sources/CqlbApp",
-            linkerSettings: [
-                .linkedFramework("AppKit"),
-                .linkedFramework("ApplicationServices"),
-                .linkedFramework("Carbon"),
-                .linkedFramework("ServiceManagement"),
-            ]
-        ),
-        .executableTarget(
             name: "CqlbIME",
-            dependencies: ["CqlbCore"],
+            dependencies: ["CqlbCore", "CqlbSettingsUI"],
             path: "Sources/CqlbIME",
             linkerSettings: [
                 .linkedFramework("AppKit"),
@@ -48,10 +36,10 @@ let package = Package(
                 .linkedFramework("Carbon"),
             ]
         ),
-        .executableTarget(
-            name: "CqlbSettings",
+        .target(
+            name: "CqlbSettingsUI",
             dependencies: ["CqlbCore"],
-            path: "Sources/CqlbSettings",
+            path: "Sources/CqlbSettingsUI",
             linkerSettings: [
                 .linkedFramework("AppKit"),
                 .linkedFramework("SwiftUI"),

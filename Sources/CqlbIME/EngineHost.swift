@@ -2,15 +2,12 @@ import Foundation
 import CqlbCore
 
 /// Process-wide holder for dictionaries and the engine. Loads once, watches
-/// the config file for live updates from CqlbSettings.
+/// the config file for live updates from the in-process settings UI.
 ///
-/// Unlike the CqlbApp (CGEventTap) variant, this IME host:
-/// - does NOT manage a login item (IME bundles are loaded on-demand by
-///   `TextInputMenuAgent`)
-/// - is still a single shared Engine — per-client state isolation in this
-///   codebase was an explicit decision (see plan; user opted for shared).
-///   `CqlbInputController` calls `engine.reset()` on activate/deactivate to
-///   keep composition state from leaking across apps.
+/// IME bundles are loaded on demand by `TextInputMenuAgent`, so this host
+/// intentionally does not manage a login item. The engine is shared within
+/// the process; `CqlbInputController` resets it on activate/deactivate so
+/// composition state does not leak across apps.
 final class EngineHost {
     static let shared = EngineHost()
 

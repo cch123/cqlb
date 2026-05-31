@@ -31,7 +31,7 @@
     <key>CFBundleShortVersionString</key>
     <string>0.1.0</string>
     <key>CFBundleVersion</key>
-    <string>6</string>
+    <string>14</string>
     <key>CFBundleSignature</key>
     <string>????</string>
     <key>CFBundleSupportedPlatforms</key>
@@ -59,11 +59,11 @@
     <string>CqlbIME.CqlbInputController</string>
     <key>InputMethodServerDelegateClass</key>
     <string>CqlbIME.CqlbInputController</string>
-    <!-- Connection name convention: $(PRODUCT_BUNDLE_IDENTIFIER)_Connection.
-         On macOS 13.4+, the system may silently fall back to this exact
-         form regardless of what you specify, so it's safest to use it. -->
+    <!-- Match Squirrel's short connection-name style. Some LaunchServices /
+         IMK paths treat this as a Mach service name, so avoid dots even
+         though older samples often used bundle-id-prefixed names. -->
     <key>InputMethodConnectionName</key>
-    <string>com.cqlb.inputmethod.cqlb_Connection</string>
+    <string>cqlb_Connection</string>
 
     <key>ComponentInputModeDict</key>
     <dict>

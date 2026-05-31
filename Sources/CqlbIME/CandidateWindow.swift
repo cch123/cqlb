@@ -8,9 +8,9 @@ import CqlbCore
 /// view layered on top. This gives a native Liquid-Glass/vibrancy appearance
 /// that blurs whatever's behind the window.
 ///
-/// Positioning: in CqlbApp the caret rect was discovered via Accessibility.
-/// Here it's provided by the IMK input controller, which asks the client
-/// directly (`-firstRect(forCharacterRange:actualRange:)`). When the client
+/// Positioning: the caret rect is provided by the IMK input controller,
+/// which asks the client directly (`-firstRect(forCharacterRange:actualRange:)`).
+/// When the client
 /// returns a zero rect (happens in Terminal, Chrome omnibox, and some
 /// Carbon apps), fallback is screen-center — same as the old behavior.
 final class CandidateWindowController {
@@ -124,14 +124,14 @@ final class CandidateWindowController {
 
 private final class CandidateView: NSView {
     private var state: EngineState = .empty
-    private let candidateFont = NSFont.systemFont(ofSize: 18, weight: .medium)
-    private let indexFont = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .semibold)
-    private let annoFont = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
-    private let preeditFont = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+    private var candidateFont = NSFont.systemFont(ofSize: 18, weight: .medium)
+    private var indexFont = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .semibold)
+    private var annoFont = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+    private var preeditFont = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
     private let hPad: CGFloat = 14
     private let vPad: CGFloat = 10
-    private let rowH: CGFloat = 30
-    private let preeditH: CGFloat = 24
+    private var rowH: CGFloat = 30
+    private var preeditH: CGFloat = 24
     private var _accentColor: NSColor = .systemRed
     private var _horizontal: Bool = false
 
@@ -140,6 +140,7 @@ private final class CandidateView: NSView {
     func update(state: EngineState) {
         self.state = state
         let appearance = EngineHost.shared.currentConfig.appearance
+        applyFont(appearance)
         switch appearance.accentColor {
         case .red:    _accentColor = .systemRed
         case .orange: _accentColor = .systemOrange
@@ -163,6 +164,20 @@ private final class CandidateView: NSView {
             panel?.appearance = NSAppearance(named: .darkAqua)
         }
         needsDisplay = true
+    }
+
+    private func applyFont(_ appearance: Config.Appearance) {
+        let size = min(max(appearance.fontSize, 10), 32)
+        // Font names come from user-editable config. Fall back instead of
+        // rendering with a missing font after machines or macOS versions
+        // differ from the one where the setting was saved.
+        candidateFont = NSFont(name: appearance.font, size: size)
+            ?? NSFont.systemFont(ofSize: size, weight: .medium)
+        indexFont = NSFont.monospacedDigitSystemFont(ofSize: max(11, size - 5), weight: .semibold)
+        annoFont = NSFont.monospacedSystemFont(ofSize: max(10, size - 7), weight: .regular)
+        preeditFont = NSFont.monospacedSystemFont(ofSize: max(11, size - 5), weight: .regular)
+        rowH = ceil(max(30, size + 12))
+        preeditH = ceil(max(24, size + 8))
     }
 
     func fittingContentSize() -> NSSize {

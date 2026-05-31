@@ -1,0 +1,38 @@
+#!/bin/sh
+set -eu
+
+IME="/Library/Input Methods/cqlb-ime.app"
+LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister"
+
+# Remove the current console user's older per-user install. A duplicate bundle
+# identifier in ~/Library/Input Methods can make TextInputMenuAgent launch the
+# stale copy instead of this package's fixed /Library install.
+CONSOLE_USER="$(/usr/bin/stat -f %Su /dev/console 2>/dev/null || true)"
+if [ -n "$CONSOLE_USER" ] && [ "$CONSOLE_USER" != "root" ]; then
+  HOME_DIR="$(/usr/bin/dscl . -read "/Users/$CONSOLE_USER" NFSHomeDirectory 2>/dev/null | /usr/bin/sed 's/^NFSHomeDirectory: //' || true)"
+  if [ -n "$HOME_DIR" ]; then
+    USER_IME="$HOME_DIR/Library/Input Methods/cqlb-ime.app"
+    if [ -d "$USER_IME" ]; then
+      "$LSREGISTER" -u "$USER_IME" >/dev/null 2>&1 || true
+      rm -rf "$USER_IME"
+    fi
+  fi
+fi
+
+if [ -d "$IME" ]; then
+  xattr -cr "$IME" 2>/dev/null || true
+  "$LSREGISTER" -f "$IME" >/dev/null 2>&1 || true
+fi
+
+# These UI processes aggressively cache TIS/LaunchServices state. Restarting
+# the current user's copies makes the newly installed /Library input method
+# appear in the menu bar, Fn HUD, and System Settings without a logout.
+for PROC in TextInputMenuAgent TextInputSwitcher ControlCenter SystemUIServer; do
+  if [ -n "$CONSOLE_USER" ] && [ "$CONSOLE_USER" != "root" ]; then
+    killall -u "$CONSOLE_USER" "$PROC" >/dev/null 2>&1 || true
+  else
+    killall "$PROC" >/dev/null 2>&1 || true
+  fi
+done
+
+exit 0

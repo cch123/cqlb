@@ -2,10 +2,11 @@ import AppKit
 import InputMethodKit
 import QuartzCore
 import CqlbCore
+import CqlbSettingsUI
 
 /// The per-client controller instantiated by IMKServer. One instance exists
 /// per connected text client, but they all share a single `EngineHost.shared`
-/// engine (per plan decision — matches the CqlbApp model).
+/// engine.
 ///
 /// Responsibilities:
 ///  - Translate NSEvents → engine `KeyEvent`
@@ -41,7 +42,8 @@ final class CqlbInputController: IMKInputController {
     override func deactivateServer(_ sender: Any!) {
         // If the user types `ao` in app A then switches to app B, we must
         // commit or abandon the pending composition. Behavior matches
-        // CqlbApp: commit the top candidate if one exists, else drop.
+        // Commit the top candidate if one exists; otherwise drop the
+        // unfinished code and clear marked text.
         let engine = EngineHost.shared.engine
         let state = engine.currentState()
         if !state.preedit.isEmpty, let first = state.candidates.first {
@@ -81,9 +83,9 @@ final class CqlbInputController: IMKInputController {
     // MARK: - IME menu (shown when user picks this IME in the menu-bar switcher)
 
     /// The system calls this when the user opens the IME's menu from the
-    /// menu-bar input switcher. We surface a single "设置…" entry that
-    /// launches the separate `cqlb Settings.app` (which reads/writes the
-    /// same config.json as this IME).
+    /// menu-bar input switcher. Settings are hosted in-process so the
+    /// distributable IME bundle does not depend on a second app being
+    /// installed beside it.
     override func menu() -> NSMenu! {
         let menu = NSMenu()
 
@@ -108,29 +110,11 @@ final class CqlbInputController: IMKInputController {
         return menu
     }
 
+    @MainActor
     @objc private func openSettings(_ sender: Any?) {
-        // Find the Settings bundle by its identifier. NSWorkspace resolves
-        // this against LaunchServices regardless of install path.
-        if let url = NSWorkspace.shared.urlForApplication(
-            withBundleIdentifier: "com.cqlb.settings"
-        ) {
-            NSWorkspace.shared.open(url)
-            return
+        SettingsWindowPresenter.shared.show {
+            EngineHost.shared.forceReloadConfig()
         }
-        // Fallback: launch by well-known path under ~/Applications (where
-        // `make install` drops it). If Settings was never installed, show
-        // an alert pointing the user at `make install`.
-        let fallback = URL(fileURLWithPath: (
-            "~/Applications/cqlb Settings.app" as NSString
-        ).expandingTildeInPath)
-        if FileManager.default.fileExists(atPath: fallback.path) {
-            NSWorkspace.shared.open(fallback)
-            return
-        }
-        let alert = NSAlert()
-        alert.messageText = "没找到 cqlb Settings.app"
-        alert.informativeText = "请在 cqlb 源码目录下运行 `make install` 安装设置应用。"
-        alert.runModal()
     }
 
     @objc private func openAbout(_ sender: Any?) {
@@ -184,7 +168,7 @@ final class CqlbInputController: IMKInputController {
 
     private func handleKeyDown(_ event: NSEvent, client sender: Any!) -> Bool {
         // Any keydown while Shift is held means Shift is acting as a
-        // modifier, not a standalone tap.
+        // modifier, not a single-key tap.
         if event.modifierFlags.contains(.shift) {
             shiftWasUsedAsModifier = true
         }
@@ -255,7 +239,8 @@ final class CqlbInputController: IMKInputController {
     // MARK: - Candidate window + inline preedit
 
     private func updateUI(state: EngineState, client sender: Any!) {
-        // Inline preedit in the client (the big IMK win over CGEventTap).
+        // Inline preedit in the client keeps the composing code inside the
+        // active text field instead of drawing it only in our candidate UI.
         setMarkedText(state.preedit, client: sender)
 
         if state.candidates.isEmpty {

@@ -12,6 +12,10 @@ struct ShortcutsView: View {
                         KeyBadge("⌥ Space")
                     }
                     GlassDivider()
+                    GlassRow("快速切换", hint: "单击 Shift 切换中英文") {
+                        KeyBadge("Shift")
+                    }
+                    GlassDivider()
                     GlassRow("清空输入", hint: "按退格或 Esc 清空当前输入") {
                         KeyBadge("Esc")
                     }

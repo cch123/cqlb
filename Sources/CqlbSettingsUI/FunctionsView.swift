@@ -7,9 +7,9 @@ struct FunctionsView: View {
     var body: some View {
         VStack(spacing: 20) {
             GlassPanel("系统") {
-                GlassRow("开机自动启动", hint: "登录时自动运行超强两笔") {
-                    Toggle("", isOn: $model.config.functions.launchAtLogin)
-                        .labelsHidden().toggleStyle(.switch)
+                GlassRow("随输入法加载", hint: "添加到输入源后由 macOS 按需加载,无需登录项") {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(.secondary)
                 }
             }
 

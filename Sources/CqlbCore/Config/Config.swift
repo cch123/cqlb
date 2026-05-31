@@ -1,6 +1,6 @@
 import Foundation
 
-/// User-editable configuration, shared by the IME and the Settings app via a
+/// User-editable configuration shared by the IME and its settings UI via a
 /// JSON file at `~/Library/Application Support/cqlb/config.json`.
 public struct Config: Codable, Sendable, Equatable {
     public var version: Int = 1
@@ -24,7 +24,6 @@ public struct Config: Codable, Sendable, Equatable {
     }
 
     public struct Functions: Codable, Sendable, Equatable {
-        public var launchAtLogin: Bool = false
         public var emojiSuggestion: Bool = true
         public var gb2312Filter: Bool = true
         public var tempEnglish: Bool = true
