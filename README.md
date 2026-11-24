@@ -3,6 +3,8 @@
 macOS 标准输入法版本的超强两笔。最多四键上屏，重码少，基于
 `InputMethodKit` 接入系统输入源。
 
+**下载安装：<https://cch123.github.io/cqlb/>**
+
 ## 功能特性
 
 **输入**
@@ -89,11 +91,15 @@ make pkg-ime PKG_CERT_NAME="Developer ID Installer: Your Name (TEAMID)"
 
 | 快捷键 | 功能 |
 |--------|------|
-| `Option` + `Space` | 切换中/英文模式 |
-| `Shift` 单击 | 快速切换中/英（<300ms，中间不按其他键） |
-| `i` + 拼音 | 临时拼音输入 |
-| 数字键 `1`-`9` | 选择对应候选词 |
-| `Space` | 选择第一个候选词 |
+| `Option` + `Space` | 切换中/英文模式（可在设置中改为 `Shift` + `Space` 或关闭） |
+| `Shift` 单击 | 快速切换中/英（<300ms，中间不按其他键或鼠标；可限定左/右 Shift 或关闭） |
+| `i` + 拼音 | 临时拼音反查 |
+| `'` + 英文 | 临时英文输入（空格连词，`Enter` 上屏） |
+| 数字键 `1`-`9` / 鼠标点击 | 选择对应候选词 |
+| `Space` | 上屏高亮候选词 |
+| `Enter` | 上屏原始输入 |
+| `↑` `↓` `←` `→` / `Tab` | 移动高亮 |
+| `-` `=` / `PageUp` `PageDown` | 翻页 |
 | `Escape` | 清空当前输入 |
 
 ## 工作原理
@@ -119,9 +125,28 @@ make pkg-ime PKG_CERT_NAME="Developer ID Installer: Your Name (TEAMID)"
 
 | 类别 | 选项 |
 |------|------|
-| 外观 | 字体、字号、候选词数量、横排/竖排、配色方案、强调色 |
-| 功能 | Emoji 联想、GB2312 过滤、临时英文、临时拼音、反查显示 |
-| 快捷键 | 中英切换键、清空缓冲区键 |
+| 外观 | 字体、字号、候选词数量、横排/竖排、光效、是否显示编码行、配色方案、强调色 |
+| 功能 | Emoji 联想、GB2312 过滤、临时英文、临时拼音、候选注释（编码/拼音） |
+| 快捷键 | 中英切换键、Shift 单击切换 |
+
+### 用户词库
+
+菜单栏输入法图标 → **编辑用户词库…**（或设置 → 功能 → 打开词库文件），编辑：
+
+```
+~/Library/Application Support/cqlb/user.dict.yaml
+```
+
+每行一个词条，字段用 Tab 分隔，保存后立即生效：
+
+```
+词组<Tab>编码          与原词库重码时排在后面
+词组<Tab>编码<Tab>2    与原词库重码时排在前面
+词组                  不写编码：按构词规则自动编码
+```
+
+自动编码规则与 Rime 方案一致：二字词取每字前两码，三字词取首字前两码
+加后两字首码，四字及以上取第一、二、三、末字首码。
 
 ## 项目结构
 
@@ -131,6 +156,7 @@ cqlb/
 │   ├── CqlbCore/         # 核心库：引擎、码表、配置
 │   ├── CqlbIME/          # IME：IMKServer、IMKInputController、候选窗口
 │   ├── CqlbSettingsUI/   # 输入法内置 SwiftUI 设置界面
+│   ├── CqlbSettingsPreview/ # 单独运行设置窗口的开发工具
 │   ├── CqlbQuery/        # 命令行查询工具（开发用）
 │   └── CqlbRepl/         # 交互式 REPL（开发用）
 ├── Dicts/                # 码表文件
@@ -150,6 +176,9 @@ make install CONFIG=release
 make package-ime           # release + notarize + zip，不写入 ~/Library
 make pkg-ime               # 从 dist 中已公证的 IME 生成 pkg 安装包
 make package-installer     # release + notarize + zip + pkg
+make test                  # 运行 CqlbCore 单元测试
+make preview               # 单独打开设置窗口（调设置界面用，不必重装输入法）
+.build/debug/cqlb-ime --preview-candidates vertical dark   # 单独显示候选窗（调样式用）
 make clean
 make uninstall             # 删除 ~/Library/Input Methods/cqlb-ime.app
 ```

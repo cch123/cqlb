@@ -16,6 +16,14 @@ final class EngineHost {
     var currentConfig: Config { config }
     private var fileWatch: DispatchSourceFileSystemObject?
 
+    /// Main table as shipped, without user-dictionary entries; the engine's
+    /// table is rebuilt from this whenever the user dictionary changes.
+    private let baseMain: CodeTable
+    private var userDictStamp: FileStamp?
+    /// Per-character stems for auto-encoding code-less user entries. Loaded
+    /// on first need only.
+    private lazy var stems: [Character: String] = Self.loadStems()
+
     private init() {
         let cfg = ConfigStore.load()
         self.config = cfg
@@ -23,6 +31,7 @@ final class EngineHost {
         Log.engine.log("loading dictionaries…")
         let start = Date()
         let resources = Self.loadResources()
+        self.baseMain = resources.main
         self.engine = Engine(
             resources: resources,
             config: EngineConfig.from(cfg)
@@ -33,26 +42,72 @@ final class EngineHost {
         if !FileManager.default.fileExists(atPath: ConfigStore.url.path) {
             try? ConfigStore.save(config)
         }
+        loadedStamp = Self.stamp()
+        UserDict.createTemplateIfMissing()
+        reloadUserDictIfChanged(force: true)
         startWatchingConfig()
     }
 
+    private static let bundleDicts = Bundle.main.resourceURL?.appendingPathComponent("Dicts")
+    private static let cacheDir = URL(fileURLWithPath: (
+        "~/Library/Caches/cqlb" as NSString
+    ).expandingTildeInPath)
+
+    /// First existing location of a dictionary file: app bundle, then
+    /// `~/Library/Rime`.
+    private static func sourceURLs(_ filename: String) -> [URL] {
+        let candidates: [URL?] = [
+            bundleDicts?.appendingPathComponent(filename),
+            URL(fileURLWithPath: ("~/Library/Rime/\(filename)" as NSString).expandingTildeInPath),
+        ]
+        return candidates.compactMap { $0 }.filter { FileManager.default.fileExists(atPath: $0.path) }
+    }
+
+    private static func loadStems() -> [Character: String] {
+        guard let src = sourceURLs("cqlb.dict.yaml").first else { return [:] }
+        let cache = cacheDir.appendingPathComponent(DictLoader.cacheFileName(for: src) + ".stems")
+        let stems = StemTable.loadCached(source: src, cache: cache)
+        Log.engine.log("loaded stems count=\(stems.count)")
+        return stems
+    }
+
+    // MARK: - User dictionary
+
+    /// Sources merged into the main table: the bundled `cqlb.src.dict.yaml`
+    /// (the schema's stock user dictionary) and the user's own file.
+    private static var userDictURLs: [URL] {
+        sourceURLs("cqlb.src.dict.yaml").prefix(1) + [UserDict.url]
+    }
+
+    /// Rebuild the engine's main table if the user dictionary file changed.
+    func reloadUserDictIfChanged(force: Bool = false) {
+        let current = Self.stamp(of: UserDict.url)
+        guard force || current != userDictStamp else { return }
+        userDictStamp = current
+
+        var entries: [Entry] = []
+        var skipped: [String] = []
+        for url in Self.userDictURLs {
+            let parsed = UserDict.load(from: url) { [unowned self] ch in self.stems[ch] }
+            entries += parsed.entries
+            skipped += parsed.skipped
+        }
+        engine.replaceMain(baseMain.merging(entries))
+        Log.engine.log("user dictionary: \(entries.count) entries, \(skipped.count) skipped")
+        if !skipped.isEmpty {
+            // Entry text only; never log what the user types.
+            Log.engine.error("user dictionary: cannot auto-encode \(skipped.count) entries (need ≥2 encodable characters)")
+        }
+    }
+
     private static func loadResources() -> EngineResources {
-        let bundleDicts = Bundle.main.resourceURL?.appendingPathComponent("Dicts")
-        let cacheDir = URL(fileURLWithPath: (
-            "~/Library/Caches/cqlb" as NSString
-        ).expandingTildeInPath)
         try? FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
 
         func loadTable(_ filename: String, cap: Int? = nil) -> CodeTable? {
-            let candidates: [URL?] = [
-                bundleDicts?.appendingPathComponent(filename),
-                URL(fileURLWithPath: (
-                    "~/Library/Rime/\(filename)" as NSString
-                ).expandingTildeInPath),
-            ]
-            for src in candidates.compactMap({ $0 }) {
-                guard FileManager.default.fileExists(atPath: src.path) else { continue }
-                let cache = cacheDir.appendingPathComponent(filename + ".bin")
+            // Remove the pre-fingerprint cache (`<name>.bin`), now orphaned.
+            try? FileManager.default.removeItem(at: cacheDir.appendingPathComponent(filename + ".bin"))
+            for src in sourceURLs(filename) {
+                let cache = cacheDir.appendingPathComponent(DictLoader.cacheFileName(for: src))
                 do {
                     let result = try DictLoader.loadCached(
                         source: src,
@@ -93,35 +148,68 @@ final class EngineHost {
         return EngineResources(main: main, pinyin: pinyin, english: english, emoji: emoji)
     }
 
+    /// Watch the config *directory*, not the file. `ConfigStore.save` writes
+    /// atomically (temp file + rename), which replaces the inode: a watcher
+    /// on the file's fd sees one `.rename` and then never fires again. A
+    /// directory fd stays valid and reports `.write` on every entry change.
     private func startWatchingConfig() {
-        let path = ConfigStore.url.path
-        guard FileManager.default.fileExists(atPath: path) else { return }
-        let fd = open(path, O_EVTONLY)
-        guard fd >= 0 else { return }
+        let dir = ConfigStore.url.deletingLastPathComponent()
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let fd = open(dir.path, O_EVTONLY)
+        guard fd >= 0 else {
+            Log.general.error("config watch: cannot open \(dir.path)")
+            return
+        }
         let src = DispatchSource.makeFileSystemObjectSource(
             fileDescriptor: fd,
-            eventMask: [.write, .delete, .rename, .extend],
+            eventMask: [.write, .extend, .attrib, .link, .rename, .delete],
             queue: .main
         )
         src.setEventHandler { [weak self] in
-            self?.reloadConfig()
+            self?.reloadConfigIfChanged()
+            self?.reloadUserDictIfChanged()
         }
         src.setCancelHandler { close(fd) }
         src.resume()
         self.fileWatch = src
     }
 
-    private func reloadConfig() {
-        let cfg = ConfigStore.load()
+    /// (mtime, size) of the config file at the last load; nil if absent.
+    private var loadedStamp: FileStamp?
+
+    private struct FileStamp: Equatable {
+        let mtime: Date
+        let size: UInt64
+    }
+
+    private static func stamp(of url: URL = ConfigStore.url) -> FileStamp? {
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+              let mtime = attrs[.modificationDate] as? Date
+        else { return nil }
+        return FileStamp(mtime: mtime, size: (attrs[.size] as? NSNumber)?.uint64Value ?? 0)
+    }
+
+    private func applyConfig(_ cfg: Config) {
         self.config = cfg
         self.engine.config = EngineConfig.from(cfg)
+    }
+
+    /// Reload only if the file changed since the last load. Cheap (one
+    /// `stat`), so it is safe to call on every client activation.
+    func reloadConfigIfChanged() {
+        let current = Self.stamp()
+        guard current != loadedStamp else { return }
+        loadedStamp = current
+        let cfg = ConfigStore.load()
+        guard cfg != config else { return }
+        applyConfig(cfg)
         Log.general.log("config reloaded")
     }
 
-    /// Called on activation to pick up config changes that the file watcher
-    /// may have missed (Settings uses atomic writes which invalidate the
-    /// watched fd).
+    /// Unconditional reload, used right after the in-process Settings UI saves.
     func forceReloadConfig() {
-        reloadConfig()
+        loadedStamp = Self.stamp()
+        applyConfig(ConfigStore.load())
+        Log.general.log("config reloaded")
     }
 }

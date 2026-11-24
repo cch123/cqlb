@@ -6,12 +6,12 @@ import Foundation
 ///
 ///     Header (32 bytes)
 ///       magic:      u32 = 'CQLB'
-///       version:    u32 = 1
+///       version:    u32 = 2
 ///       entryCount: u32
 ///       blobSize:   u32
 ///       nameOff:    u32
 ///       nameLen:    u32
-///       reserved:   u32 x2
+///       fingerprint: u64  (source identity, see `DictLoader.fingerprint`)
 ///
 ///     Entries (20 bytes each, already sorted by code asc then weight desc)
 ///       textOff:  u32
@@ -24,7 +24,7 @@ import Foundation
 ///       raw UTF-8 bytes; entries point into this region.
 public enum BinaryCache {
     static let magic: UInt32 = 0x43514C42  // 'CQLB'
-    static let version: UInt32 = 1
+    static let version: UInt32 = 2
     static let headerSize = 32
     static let entryRecordSize = 20
 
@@ -46,7 +46,7 @@ public enum BinaryCache {
 
     // MARK: - Write
 
-    public static func write(_ table: CodeTable, to url: URL) throws {
+    public static func write(_ table: CodeTable, to url: URL, fingerprint: UInt64 = 0) throws {
         let entries = table.allEntries()
         var blob = Data()
         blob.reserveCapacity(entries.count * 8 + table.name.utf8.count)
@@ -93,8 +93,8 @@ public enum BinaryCache {
             p[3] = UInt32(blob.count)
             p[4] = nameOff
             p[5] = nameLen
-            p[6] = 0
-            p[7] = 0
+            p[6] = UInt32(truncatingIfNeeded: fingerprint)
+            p[7] = UInt32(truncatingIfNeeded: fingerprint >> 32)
         }
 
         try FileManager.default.createDirectory(
@@ -112,6 +112,19 @@ public enum BinaryCache {
     }
 
     // MARK: - Read
+
+    /// Read only the source fingerprint stored in the header. Returns nil if
+    /// the file is missing, truncated, or written by another format version.
+    public static func readFingerprint(from url: URL) -> UInt64? {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? handle.close() }
+        guard let header = try? handle.read(upToCount: headerSize),
+              header.count == headerSize,
+              header.u32(at: 0) == magic,
+              header.u32(at: 4) == version
+        else { return nil }
+        return UInt64(header.u32(at: 24)) | (UInt64(header.u32(at: 28)) << 32)
+    }
 
     public static func read(from url: URL) throws -> CodeTable {
         let data = try Data(contentsOf: url, options: [.mappedIfSafe])

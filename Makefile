@@ -34,19 +34,41 @@ export DEVELOPER_DIR := $(XCODE_DEVELOPER_DIR)
 endif
 endif
 SWIFT        ?= xcrun swift
+# SwiftPM stamps LC_BUILD_VERSION's `sdk` field with the deployment target
+# (14.0) instead of the SDK actually built against. AppKit keys its
+# "linked on or after" checks off that field, so the binary was treated as a
+# macOS 14 app and rendered with the legacy pre-Liquid-Glass control
+# appearance on newer systems. Re-state the platform version with the real
+# SDK version; the later -platform_version wins at link time.
+SDK_VERSION  := $(shell xcrun --show-sdk-version 2>/dev/null)
+MIN_MACOS    := 14.0
+ifneq ($(SDK_VERSION),)
+LINK_SDK_FLAGS := -Xlinker -platform_version -Xlinker macos -Xlinker $(MIN_MACOS) -Xlinker $(SDK_VERSION)
+endif
 CLANG_MODULE_CACHE_PATH ?= $(CURDIR)/.build/module-cache
 export CLANG_MODULE_CACHE_PATH
 
 DICT_FILES   := cqlb.dict.yaml cqlb.src.dict.yaml ipinyin.dict.yaml \
                 english.dict.yaml emoji_word.txt emoji_category.txt
 
-.PHONY: build install clean uninstall build-ime bundle-ime install-ime notarize-ime package-ime pkg-ime package-installer uninstall-ime
+.PHONY: build install clean uninstall test preview build-ime bundle-ime install-ime notarize-ime package-ime pkg-ime package-installer uninstall-ime
 
 build: build-ime
 
 install: install-ime
 
 uninstall: uninstall-ime
+
+test:
+	@mkdir -p "$(CLANG_MODULE_CACHE_PATH)"
+	$(SWIFT) test
+
+# Run the settings window standalone, for iterating on the settings UI
+# without reinstalling the input method.
+preview:
+	@mkdir -p "$(CLANG_MODULE_CACHE_PATH)"
+	$(SWIFT) build --product cqlb-settings-preview $(LINK_SDK_FLAGS)
+	.build/debug/cqlb-settings-preview
 
 clean:
 	@echo "==> cleaning"
@@ -59,7 +81,12 @@ clean:
 build-ime:
 	@echo "==> swift build cqlb-ime ($(CONFIG))"
 	@mkdir -p "$(CLANG_MODULE_CACHE_PATH)"
-	$(SWIFT) build $(BUILD_FLAG) --product cqlb-ime
+	$(SWIFT) build $(BUILD_FLAG) --product cqlb-ime $(LINK_SDK_FLAGS)
+	@# Fail the build rather than silently ship the legacy appearance.
+	@if [ -n "$(SDK_VERSION)" ]; then \
+		otool -l "$(BUILD_DIR)/cqlb-ime" | grep -A4 LC_BUILD_VERSION | grep -q "sdk $(SDK_VERSION)" \
+			|| { echo "error: cqlb-ime not linked against SDK $(SDK_VERSION)"; exit 1; }; \
+	fi
 
 bundle-ime: build-ime
 	@echo "==> generating icons"

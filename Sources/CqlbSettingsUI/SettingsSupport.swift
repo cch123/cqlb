@@ -2,13 +2,15 @@ import AppKit
 import SwiftUI
 import CqlbCore
 
+/// Settings state. Edits apply immediately: every change schedules a
+/// debounced write of `config.json`, which the IME picks up at once.
 @Observable
 final class SettingsModel {
     var config: Config
-    var isDirty: Bool = false
 
     private let onSave: (() -> Void)?
     private var savedConfig: Config
+    private var pendingSave: DispatchWorkItem?
 
     init(onSave: (() -> Void)? = nil) {
         let config = ConfigStore.load()
@@ -17,24 +19,27 @@ final class SettingsModel {
         self.onSave = onSave
     }
 
-    func markDirty() {
-        isDirty = (config != savedConfig)
+    /// Coalesce bursts of changes (e.g. dragging the font-size slider) into
+    /// one file write.
+    func scheduleSave() {
+        pendingSave?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.flush() }
+        pendingSave = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: work)
     }
 
-    func save() {
+    /// Write pending changes now. Called when the window closes.
+    func flush() {
+        pendingSave?.cancel()
+        pendingSave = nil
+        guard config != savedConfig else { return }
         do {
             try ConfigStore.save(config)
             savedConfig = config
-            isDirty = false
             onSave?()
         } catch {
             NSLog("[cqlb-settings-ui] save failed: %@", String(describing: error))
         }
-    }
-
-    func revert() {
-        config = savedConfig
-        isDirty = false
     }
 }
 
@@ -45,9 +50,13 @@ public struct SettingsContentView: View {
         _model = State(initialValue: SettingsModel(onSave: onSave))
     }
 
+    init(model: SettingsModel) {
+        _model = State(initialValue: model)
+    }
+
     public var body: some View {
         RootView(model: model)
-            .frame(minWidth: 780, minHeight: 560)
+            .frame(minWidth: 700, minHeight: 520)
     }
 }
 
@@ -56,6 +65,7 @@ public final class SettingsWindowPresenter: NSObject, NSWindowDelegate {
     public static let shared = SettingsWindowPresenter()
 
     private var window: NSWindow?
+    private var model: SettingsModel?
     private var restoreAccessoryPolicyOnClose = false
 
     private override init() {}
@@ -68,7 +78,9 @@ public final class SettingsWindowPresenter: NSObject, NSWindowDelegate {
             return
         }
 
-        let content = SettingsContentView(onSave: onSave)
+        let model = SettingsModel(onSave: onSave)
+        self.model = model
+        let content = SettingsContentView(model: model)
         let hostingController = NSHostingController(rootView: content)
         // Avoid NSWindow(contentViewController:): on macOS 26, an IME process
         // can crash inside AppKit's private title binding setup for that
@@ -76,15 +88,29 @@ public final class SettingsWindowPresenter: NSObject, NSWindowDelegate {
         // controller afterward bypasses the binding path while keeping the
         // same visible window behavior.
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 780, height: 560),
+            contentRect: NSRect(x: 0, y: 0, width: 780, height: 620),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
         window.contentViewController = hostingController
-        window.title = "超强两笔 · 设置"
-        window.minSize = NSSize(width: 780, height: 560)
-        window.setContentSize(NSSize(width: 780, height: 560))
+        // The title still names the window in Mission Control and the Window
+        // menu, but is not drawn: content runs edge to edge under a
+        // transparent title bar, and the window can be dragged by any empty
+        // area since there is no visible title bar to grab.
+        window.title = "超强两笔设置"
+        window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = true
+        // An empty unified toolbar moves the traffic-light buttons down and
+        // inward to the standard position, so they sit inside the floating
+        // sidebar panel instead of on its rounded corner.
+        let toolbar = NSToolbar(identifier: "cqlb.settings")
+        toolbar.displayMode = .iconOnly
+        window.toolbar = toolbar
+        window.toolbarStyle = .unified
+        window.isMovableByWindowBackground = true
+        window.minSize = NSSize(width: 700, height: 520)
+        window.setContentSize(NSSize(width: 780, height: 620))
         window.isReleasedWhenClosed = false
         window.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
         window.delegate = self
@@ -118,7 +144,11 @@ public final class SettingsWindowPresenter: NSObject, NSWindowDelegate {
     }
 
     public func windowWillClose(_ notification: Notification) {
+        // Changes save as they are made; flush the debounce window so the
+        // last edit before closing is not lost.
+        model?.flush()
         window = nil
+        model = nil
         if restoreAccessoryPolicyOnClose {
             restoreAccessoryPolicyOnClose = false
             NSApp.setActivationPolicy(.accessory)

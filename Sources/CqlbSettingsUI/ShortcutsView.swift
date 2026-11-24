@@ -5,54 +5,51 @@ struct ShortcutsView: View {
     @Bindable var model: SettingsModel
 
     var body: some View {
-        VStack(spacing: 20) {
-            GlassPanel("激活 / 切换") {
-                VStack(spacing: 14) {
-                    GlassRow("中英文切换", hint: "按一次进入中文,再按一次退出") {
-                        KeyBadge("⌥ Space")
+        VStack(alignment: .leading, spacing: 22) {
+            Card("中英文切换") {
+                SettingRow("组合键") {
+                    Picker("", selection: $model.config.shortcuts.toggleChineseEnglish) {
+                        Text("⌥ 空格").tag(Config.Shortcuts.ToggleKey.optionSpace)
+                        Text("⇧ 空格").tag(Config.Shortcuts.ToggleKey.shiftSpace)
+                        Text("关闭").tag(Config.Shortcuts.ToggleKey.none)
                     }
-                    GlassDivider()
-                    GlassRow("快速切换", hint: "单击 Shift 切换中英文") {
-                        KeyBadge("Shift")
+                    .labelsHidden()
+                    .fixedSize()
+                }
+                RowDivider()
+                SettingRow("单击 Shift", hint: "快速按下并松开，期间不按其他键") {
+                    Picker("", selection: $model.config.shortcuts.shiftTap) {
+                        Text("任意 Shift").tag(Config.Shortcuts.ShiftTap.both)
+                        Text("左 Shift").tag(Config.Shortcuts.ShiftTap.left)
+                        Text("右 Shift").tag(Config.Shortcuts.ShiftTap.right)
+                        Text("关闭").tag(Config.Shortcuts.ShiftTap.none)
                     }
-                    GlassDivider()
-                    GlassRow("清空输入", hint: "按退格或 Esc 清空当前输入") {
-                        KeyBadge("Esc")
-                    }
+                    .labelsHidden()
+                    .fixedSize()
                 }
             }
 
-            GlassPanel("候选窗口") {
-                VStack(spacing: 14) {
-                    GlassRow("选择候选词") { KeyBadge("1 – 9") }
-                    GlassDivider()
-                    GlassRow("上屏首候选") { KeyBadge("Space") }
-                    GlassDivider()
-                    GlassRow("上屏原始输入") { KeyBadge("Enter") }
-                    GlassDivider()
-                    GlassRow("翻页") { KeyBadge("↑ / ↓") }
+            Card("候选词") {
+                SettingRow("选择候选词") { KeyBadge("1 – 9"); KeyBadge("鼠标点击") }
+                RowDivider()
+                SettingRow("上屏高亮的候选词") { KeyBadge("空格") }
+                RowDivider()
+                SettingRow("移动高亮") {
+                    KeyBadge("↑"); KeyBadge("↓"); KeyBadge("←"); KeyBadge("→"); KeyBadge("Tab")
                 }
+                RowDivider()
+                SettingRow("翻页") {
+                    KeyBadge("-"); KeyBadge("="); KeyBadge("PgUp"); KeyBadge("PgDn")
+                }
+            }
+
+            Card("编码") {
+                SettingRow("上屏原始输入", hint: "拼音和英文模式会去掉 i / ' 前缀") { KeyBadge("回车") }
+                RowDivider()
+                SettingRow("删除一个编码") { KeyBadge("退格") }
+                RowDivider()
+                SettingRow("清空输入") { KeyBadge("Esc") }
             }
         }
-    }
-}
-
-struct KeyBadge: View {
-    let label: String
-    init(_ label: String) { self.label = label }
-
-    var body: some View {
-        Text(label)
-            .font(.system(.callout, design: .monospaced).weight(.medium))
-            .padding(.horizontal, 10)
-            .padding(.vertical, 4)
-            .background(
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(.ultraThinMaterial)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .strokeBorder(.white.opacity(0.2), lineWidth: 0.5)
-            )
     }
 }

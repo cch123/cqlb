@@ -1,7 +1,7 @@
 import Foundation
 
 /// Configuration passed into the engine. Mirrors the JSON config file.
-public struct EngineConfig: Sendable {
+public struct EngineConfig: Sendable, Equatable {
     public var candidateCount: Int
     public var maxCodeLength: Int
     public var autoSelect: Bool
@@ -10,6 +10,17 @@ public struct EngineConfig: Sendable {
     public var enableEmoji: Bool
     public var enableGb2312: Bool
     public var enableRecognizer: Bool
+    public var annotation: Annotation
+
+    /// What to show next to each candidate.
+    ///
+    /// - `code`: the cqlb code. For main-table candidates that is the entry's
+    ///   own code; for pinyin reverse-lookup candidates it is the shortest
+    ///   cqlb code of the word (the point of 反查: learn how to type it).
+    /// - `pinyin`: the word's pinyin from the ipinyin table.
+    public enum Annotation: Sendable, Equatable {
+        case none, code, pinyin, both
+    }
 
     public static let `default` = EngineConfig(
         candidateCount: 6,
@@ -19,7 +30,8 @@ public struct EngineConfig: Sendable {
         enableTempPinyin: true,
         enableEmoji: true,
         enableGb2312: true,
-        enableRecognizer: true
+        enableRecognizer: true,
+        annotation: .code
     )
 
     public init(
@@ -30,7 +42,8 @@ public struct EngineConfig: Sendable {
         enableTempPinyin: Bool,
         enableEmoji: Bool,
         enableGb2312: Bool,
-        enableRecognizer: Bool
+        enableRecognizer: Bool,
+        annotation: Annotation = .code
     ) {
         self.candidateCount = candidateCount
         self.maxCodeLength = maxCodeLength
@@ -40,6 +53,7 @@ public struct EngineConfig: Sendable {
         self.enableEmoji = enableEmoji
         self.enableGb2312 = enableGb2312
         self.enableRecognizer = enableRecognizer
+        self.annotation = annotation
     }
 }
 
@@ -85,15 +99,20 @@ public struct KeyEvent: Sendable {
     }
 }
 
-/// One candidate as rendered in the UI. Carries annotation text so the shell
-/// can display code / pinyin next to the primary word.
+/// One candidate as rendered in the UI.
+///
+/// `code` is the dictionary code the candidate was matched by and drives
+/// engine logic (auto-select, rival detection). `annotation` is display-only
+/// text derived from the annotation setting and may be empty.
 public struct DisplayCandidate: Sendable, Hashable {
     public let text: String
-    public let annotation: String      // e.g. "aajj" or "nihao"
+    public let code: String
+    public let annotation: String
     public let source: Candidate.Source
 
-    public init(text: String, annotation: String, source: Candidate.Source) {
+    public init(text: String, code: String, annotation: String, source: Candidate.Source) {
         self.text = text
+        self.code = code
         self.annotation = annotation
         self.source = source
     }
@@ -119,6 +138,16 @@ public struct EngineState: Sendable {
     public var hasNextPage: Bool
     public var isPinyinMode: Bool
     public var isEnglishMode: Bool
+    /// Buffer matched a recognizer pattern (URL / e-mail) and is passed
+    /// through verbatim; there are intentionally no candidates.
+    public var isRawMode: Bool
+
+    /// Modes in which an empty candidate list is a valid, visible state
+    /// (the user is still typing and can backspace), as opposed to main
+    /// mode where "no candidates" means an invalid code.
+    public var keepsPreeditWithoutCandidates: Bool {
+        isPinyinMode || isEnglishMode || isRawMode
+    }
 
     public static let empty = EngineState(
         preedit: "",
@@ -128,40 +157,80 @@ public struct EngineState: Sendable {
         hasPrevPage: false,
         hasNextPage: false,
         isPinyinMode: false,
-        isEnglishMode: false
+        isEnglishMode: false,
+        isRawMode: false
     )
 }
 
 public final class Engine {
-    public var config: EngineConfig
-    public let resources: EngineResources
+    /// Assigning a new config takes effect immediately, including the
+    /// GB2312 filter and recognizer, which were previously frozen at init.
+    public var config: EngineConfig {
+        didSet {
+            config.candidateCount = min(max(config.candidateCount, 1), 9)
+            if config.enableGb2312 != gb2312.isEnabled {
+                gb2312 = Gb2312Filter(enabled: config.enableGb2312)
+            }
+            if config.enableRecognizer != recognizer.isEnabled {
+                recognizer = Recognizer(enabled: config.enableRecognizer)
+            }
+            if config != oldValue { warmIndexes() }
+        }
+    }
+    public private(set) var resources: EngineResources
     private let punctuator: Punctuator
-    private let gb2312: Gb2312Filter
-    private let recognizer: Recognizer
+    private var gb2312: Gb2312Filter
+    private var recognizer: Recognizer
 
     private var buffer: String = ""
     private var allCandidates: [DisplayCandidate] = []
     private var pageIndex: Int = 0
     private var highlightedIndex: Int = 0
 
+    /// word → shortest cqlb code. Built on first use; dropped by `replaceMain`.
+    private var codeIndexStorage: [String: String]?
+    private var codeIndex: [String: String] {
+        if let cached = codeIndexStorage { return cached }
+        let built = Self.buildCodeIndex(resources.main)
+        codeIndexStorage = built
+        return built
+    }
+    /// word → pinyin reading(s). Built on first use.
+    private lazy var pinyinIndex: [String: String] = Self.buildPinyinIndex(resources.pinyin)
+
     public init(resources: EngineResources, config: EngineConfig = .default) {
         self.resources = resources
-        self.config = config
+        var cfg = config
+        cfg.candidateCount = min(max(cfg.candidateCount, 1), 9)
+        self.config = cfg
         self.punctuator = Punctuator()
-        self.gb2312 = Gb2312Filter(enabled: config.enableGb2312)
-        self.recognizer = Recognizer(enabled: config.enableRecognizer)
+        self.gb2312 = Gb2312Filter(enabled: cfg.enableGb2312)
+        self.recognizer = Recognizer(enabled: cfg.enableRecognizer)
+        warmIndexes()
     }
 
     // MARK: - Public API
 
     public func currentState() -> EngineState { state() }
 
+    /// Clear the composition. Deliberately leaves the punctuator's paired
+    /// quote state alone: `reset()` runs after every commit, and clearing the
+    /// state there made `"你好"` come out as “你好“ (the closing quote never
+    /// appeared once any text was committed in between).
     public func reset() {
         buffer = ""
         allCandidates = []
         pageIndex = 0
         highlightedIndex = 0
-        punctuator.reset()
+    }
+
+    /// Swap the main code table (user dictionary reloaded). Abandons any
+    /// in-flight composition, whose candidates came from the old table.
+    public func replaceMain(_ table: CodeTable) {
+        reset()
+        resources.main = table
+        codeIndexStorage = nil
+        warmIndexes()
     }
 
     public func processKey(_ event: KeyEvent) -> EngineResult {
@@ -175,6 +244,20 @@ public final class Engine {
         }
 
         guard let char = event.char else { return .passthrough }
+
+        // Raw mode (URL / e-mail). Checked first so that `.`, `@`, `:`,
+        // digits and capitals extend the literal instead of being taken as
+        // punctuation, candidate selection, or a commit trigger.
+        if !buffer.isEmpty,
+           Self.isPrintableASCII(char),
+           recognizer.match(buffer + String(char)) != nil
+        {
+            buffer.append(char)
+            allCandidates = []
+            pageIndex = 0
+            highlightedIndex = 0
+            return .update(state())
+        }
 
         // Digit selection. While a composition is active, `1`..`9` pick the
         // corresponding candidate on the current page. cqlb's speller alphabet
@@ -190,131 +273,70 @@ public final class Engine {
         }
 
         // Page navigation with `-` and `=` keys when candidates are showing.
-        if !buffer.isEmpty {
-            if char == "-" && !allCandidates.isEmpty {
-                return handleSpecial(.pageUp)
-            }
-            if char == "=" && !allCandidates.isEmpty {
-                return handleSpecial(.pageDown)
-            }
+        // Not in temp-English mode, where `-` is part of words.
+        if !buffer.isEmpty, !allCandidates.isEmpty, !isEnglishBuffer {
+            if char == "-" { return handleSpecial(.pageUp) }
+            if char == "=" { return handleSpecial(.pageDown) }
         }
 
-        // Punctuation: only when we can consume it cleanly.
-        if let punctOut = punctuator.translate(char, bufferEmpty: buffer.isEmpty) {
-            if buffer.isEmpty {
-                return .commit(punctOut, state: state())
+        if isEnglishBuffer {
+            return handleEnglishChar(char)
+        }
+
+        if buffer.isEmpty {
+            return handleCharOnEmptyBuffer(char)
+        }
+
+        // `'` while composing: commit what we have, then enter temp English
+        // (or emit a literal `'` if temp English is unavailable). Previously
+        // the `'` was appended to the cqlb code, the lookup came back empty
+        // and the whole composition was silently discarded.
+        if char == "'" {
+            let flushed = topCandidateText() ?? displayPreedit()
+            reset()
+            if englishAvailable {
+                buffer = "'"
+                recompute()
+                return .commit(flushed, state: state())
             }
-            // Buffer non-empty and char is a pure-punct char (not an alphabet overlap):
-            // flush current buffer's top candidate, then emit punctuation after.
-            let flushed = topCandidateText() ?? buffer
+            return .commit(flushed + "'", state: state())
+        }
+
+        // Non-overlap punctuation: flush the top candidate, then emit the
+        // Chinese punctuation after it.
+        if let punctOut = punctuator.translate(char, bufferEmpty: false) {
+            let flushed = topCandidateText() ?? displayPreedit()
             reset()
             return .commit(flushed + punctOut, state: state())
         }
 
-        // Alphabetic composition extension.
         if isSpellerChar(char) {
-            // Lookahead for alphabet-overlap punctuation (`,./;`): if appending
-            // this char would eliminate all candidates, don't eat it into the
-            // buffer. Instead, commit the current top candidate (if any) and
-            // emit the char as Chinese punctuation. This is the behavior users
-            // expect when typing "iwoshi," — the comma should punctuate, not
-            // poison the pinyin composition.
-            if isOverlapPunct(char) && !buffer.isEmpty {
-                let candidate = buffer + String(char)
-                let probe = query(candidate)
-                if probe.isEmpty {
-                    let prevTop = topCandidateText()
-                    reset()
-                    if let punctOut = punctuator.translate(char, bufferEmpty: true) {
-                        return .commit((prevTop ?? "") + punctOut, state: state())
-                    }
-                    // No punct mapping — fall through to pass so the char reaches
-                    // the client literally.
-                    return .passthrough
-                }
-            }
-
-            // When buffer is already at max code length and there are
-            // candidates showing (rival/ambiguous case), commit the top
-            // candidate and start a new buffer with this new character.
-            // Only applies to cqlb main mode — English (`'`-prefix) and
-            // pinyin reverse lookup (`i`-prefix) allow codes longer than
-            // the schema's 4-char maximum, so committing mid-word here
-            // would cut the user off before they finish typing.
-            if buffer.count >= config.maxCodeLength,
-               !allCandidates.isEmpty,
-               !isInPinyinMode(),
-               !buffer.hasPrefix("'"),
-               let first = allCandidates.first
-            {
-                let text = first.text
-                reset()
-                buffer.append(char)
-                recompute()
-                return .commit(text, state: state())
-            }
-
-            buffer.append(char)
-            recompute()
-
-            // Recognizer bypass (url / email): preedit is shown but no candidates.
-            if recognizer.match(buffer) != nil {
-                allCandidates = []
-                return .update(state())
-            }
-
-            // Auto-select: only for cqlb main mode, only when the buffer has
-            // reached the schema's max code length, and only when the top
-            // candidate's code is an EXACT match for the current buffer.
-            // Skip auto-select when multiple candidates share the same exact
-            // code — let the user pick from the candidate list instead.
-            if config.autoSelect,
-               buffer.count == config.maxCodeLength,
-               let first = allCandidates.first,
-               first.source == .main,
-               first.annotation == buffer
-            {
-                let hasRival = allCandidates.dropFirst().contains {
-                    $0.source == .main && $0.annotation == buffer
-                }
-                if !hasRival {
-                    let text = first.text
-                    reset()
-                    return .commit(text, state: state())
-                }
-            }
-
-            // auto_clear: max_length — if we reached max code length but have
-            // NO candidates (invalid code), silently discard the buffer. This
-            // matches Rime's behavior: the user never sees "no candidates" for
-            // full-length codes.
-            if buffer.count >= config.maxCodeLength,
-               allCandidates.isEmpty,
-               !isInPinyinMode(),
-               !buffer.hasPrefix("'")
-            {
-                reset()
-                return .update(state())
-            }
-
-            return .update(state())
+            return extendComposition(with: char)
         }
 
-        // Non-speller, non-punct key with an active buffer: let the system handle it.
+        // Any other printable key while composing (capital letters, digits
+        // with no candidates, Option-symbols …): commit the top candidate and
+        // the key's own text. Passing the key through instead would let the
+        // client insert it next to still-marked preedit text.
+        if Self.isPrintable(char) {
+            let flushed = topCandidateText() ?? displayPreedit()
+            reset()
+            return .commit(flushed + String(char), state: state())
+        }
         return .passthrough
     }
 
     public func selectCandidate(at index: Int) -> EngineResult {
         let pageStart = pageIndex * config.candidateCount
         let absolute = pageStart + index
-        guard absolute < allCandidates.count else {
+        guard index >= 0, absolute < allCandidates.count else {
             return .update(state())
         }
         let chosen = allCandidates[absolute]
 
         // English mode: replace the last word in the buffer with the chosen
         // completion, keeping previous words. User continues building a phrase.
-        if buffer.hasPrefix("'") {
+        if isEnglishBuffer {
             let parts = buffer.split(separator: " ", omittingEmptySubsequences: false)
             if parts.count > 1 {
                 var newParts = Array(parts.dropLast())
@@ -331,7 +353,121 @@ public final class Engine {
         return .commit(chosen.text, state: state())
     }
 
-    // MARK: - Internals
+    // MARK: - Character handling
+
+    private func handleCharOnEmptyBuffer(_ char: Character) -> EngineResult {
+        // `'` only starts temp English when that mode is usable; otherwise
+        // let the literal apostrophe through instead of swallowing it.
+        if char == "'" && !englishAvailable {
+            return .passthrough
+        }
+        if let punctOut = punctuator.translate(char, bufferEmpty: true) {
+            return .commit(punctOut, state: state())
+        }
+        if isSpellerChar(char) {
+            return extendComposition(with: char)
+        }
+        return .passthrough
+    }
+
+    /// Temp-English (`'`-prefixed) composition. Letters, digits, `'` and
+    /// `-` build the current word; other printable ASCII ends the phrase and
+    /// is committed after it verbatim (English text wants ASCII punctuation,
+    /// not full-width Chinese punctuation).
+    private func handleEnglishChar(_ char: Character) -> EngineResult {
+        if let a = char.asciiValue,
+           (a >= 0x30 && a <= 0x39) || (a >= 0x41 && a <= 0x5A) || (a >= 0x61 && a <= 0x7A)
+            || char == "'" || char == "-"
+        {
+            buffer.append(char)
+            recompute()
+            return .update(state())
+        }
+        if Self.isPrintable(char) {
+            let out = englishPhrase() + String(char)
+            reset()
+            return .commit(out, state: state())
+        }
+        return .passthrough
+    }
+
+    /// Append a speller character to a main / pinyin composition.
+    private func extendComposition(with char: Character) -> EngineResult {
+        // Lookahead for alphabet-overlap punctuation (`,./;`): if appending
+        // this char would eliminate all candidates, don't eat it into the
+        // buffer. Instead, commit the current top candidate (if any) and
+        // emit the char as Chinese punctuation. This is the behavior users
+        // expect when typing "iwoshi," — the comma should punctuate, not
+        // poison the pinyin composition.
+        if isOverlapPunct(char) && !buffer.isEmpty {
+            let probe = query(buffer + String(char))
+            if probe.isEmpty {
+                let prevTop = topCandidateText() ?? displayPreedit()
+                reset()
+                if let punctOut = punctuator.translate(char, bufferEmpty: true) {
+                    return .commit(prevTop + punctOut, state: state())
+                }
+                return .commit(prevTop + String(char), state: state())
+            }
+        }
+
+        // When buffer is already at max code length and there are
+        // candidates showing (rival/ambiguous case), commit the top
+        // candidate and start a new buffer with this new character.
+        // Only applies to cqlb main mode — pinyin reverse lookup
+        // (`i`-prefix) allows codes longer than the schema's 4-char maximum.
+        if buffer.count >= config.maxCodeLength,
+           !allCandidates.isEmpty,
+           !isInPinyinMode(),
+           let first = allCandidates.first
+        {
+            let text = first.text
+            reset()
+            buffer.append(char)
+            recompute()
+            return .commit(text, state: state())
+        }
+
+        buffer.append(char)
+        recompute()
+
+        // Auto-select: only for cqlb main mode, only when the buffer has
+        // reached the schema's max code length, and only when the top
+        // candidate's code is an EXACT match for the current buffer.
+        // Skip auto-select when multiple candidates share the same exact
+        // code — let the user pick from the candidate list instead.
+        if config.autoSelect,
+           buffer.count == config.maxCodeLength,
+           let first = allCandidates.first,
+           first.source == .main,
+           first.code == buffer
+        {
+            let hasRival = allCandidates.dropFirst().contains {
+                $0.source == .main && $0.code == buffer
+            }
+            if !hasRival {
+                let text = first.text
+                reset()
+                return .commit(text, state: state())
+            }
+        }
+
+        // auto_clear: max_length — if we reached max code length but have
+        // NO candidates (invalid code), silently discard the buffer. This
+        // matches Rime's behavior: the user never sees "no candidates" for
+        // full-length codes.
+        if buffer.count >= config.maxCodeLength,
+           allCandidates.isEmpty,
+           !isInPinyinMode()
+        {
+            reset()
+            return .update(state())
+        }
+
+        return .update(state())
+    }
+
+    // MARK: - Special keys
 
     private func handleSpecial(_ special: KeyEvent.Special) -> EngineResult {
         switch special {
@@ -342,14 +478,20 @@ public final class Engine {
                 reset()
                 return .update(state())
             }
-            recompute()
+            if recognizer.match(buffer) != nil {
+                allCandidates = []
+                pageIndex = 0
+                highlightedIndex = 0
+            } else {
+                recompute()
+            }
             return .update(state())
 
         case .space:
             if buffer.isEmpty { return .passthrough }
             // English mode: space appends to buffer (building a phrase).
             // Enter commits the whole thing.
-            if buffer.hasPrefix("'") {
+            if isEnglishBuffer {
                 buffer.append(" ")
                 recompute()
                 return .update(state())
@@ -360,15 +502,27 @@ public final class Engine {
                 reset()
                 return .commit(out, state: state())
             }
+            if allCandidates.isEmpty {
+                // e.g. pinyin with no match: commit what was typed rather
+                // than swallowing the space with no visible effect.
+                let out = displayPreedit()
+                reset()
+                return .commit(out, state: state())
+            }
             return selectCandidate(at: highlightedIndex)
 
         case .enter:
             if buffer.isEmpty { return .passthrough }
-            // English mode: strip the leading `'` and commit the phrase.
-            // Normal mode: commit the raw buffer.
-            var out = buffer
-            if out.hasPrefix("'") { out = String(out.dropFirst()) }
-            out = out.trimmingCharacters(in: .whitespaces)
+            // Commit the typed text verbatim, minus mode prefixes:
+            // `'` (temp English) and `i` (pinyin reverse lookup).
+            let out: String
+            if isEnglishBuffer {
+                out = englishPhrase()
+            } else if isInPinyinMode() {
+                out = String(buffer.dropFirst())
+            } else {
+                out = buffer
+            }
             reset()
             return .commit(out, state: state())
 
@@ -377,36 +531,20 @@ public final class Engine {
             reset()
             return .update(state())
 
-        case .arrowDown:
+        case .arrowDown, .arrowRight, .tab:
             if allCandidates.isEmpty {
                 if !buffer.isEmpty { return .update(state()) }
                 return .passthrough
             }
-            let pageSize = config.candidateCount
-            let pageStart = pageIndex * pageSize
-            let pageEnd = min(pageStart + pageSize, allCandidates.count)
-            let pageCandCount = pageEnd - pageStart
-            if highlightedIndex + 1 < pageCandCount {
-                highlightedIndex += 1
-            } else if (pageIndex + 1) * pageSize < allCandidates.count {
-                pageIndex += 1
-                highlightedIndex = 0
-            }
+            moveHighlight(by: 1)
             return .update(state())
 
-        case .arrowUp:
+        case .arrowUp, .arrowLeft:
             if allCandidates.isEmpty {
                 if !buffer.isEmpty { return .update(state()) }
                 return .passthrough
             }
-            if highlightedIndex > 0 {
-                highlightedIndex -= 1
-            } else if pageIndex > 0 {
-                pageIndex -= 1
-                let pageStart = pageIndex * config.candidateCount
-                let pageEnd = min(pageStart + config.candidateCount, allCandidates.count)
-                highlightedIndex = (pageEnd - pageStart) - 1
-            }
+            moveHighlight(by: -1)
             return .update(state())
 
         case .pageDown:
@@ -426,11 +564,34 @@ public final class Engine {
             }
             if !buffer.isEmpty { return .update(state()) }
             return .passthrough
-
-        default:
-            return .passthrough
         }
     }
+
+    /// Move the highlight one slot, crossing page boundaries.
+    private func moveHighlight(by delta: Int) {
+        let pageSize = config.candidateCount
+        let pageStart = pageIndex * pageSize
+        let pageCandCount = min(pageStart + pageSize, allCandidates.count) - pageStart
+        if delta > 0 {
+            if highlightedIndex + 1 < pageCandCount {
+                highlightedIndex += 1
+            } else if (pageIndex + 1) * pageSize < allCandidates.count {
+                pageIndex += 1
+                highlightedIndex = 0
+            }
+        } else {
+            if highlightedIndex > 0 {
+                highlightedIndex -= 1
+            } else if pageIndex > 0 {
+                pageIndex -= 1
+                let start = pageIndex * pageSize
+                let end = min(start + pageSize, allCandidates.count)
+                highlightedIndex = (end - start) - 1
+            }
+        }
+    }
+
+    // MARK: - Query
 
     private func recompute() {
         pageIndex = 0
@@ -439,11 +600,10 @@ public final class Engine {
     }
 
     private func query(_ input: String) -> [DisplayCandidate] {
-        guard !input.isEmpty else { return [] }
+        guard let first = input.first else { return [] }
 
         // Prefix dispatch.
-        let first = input.first!
-        if first == "'" && config.enableTempEnglish, let eng = resources.english {
+        if first == "'" && englishAvailable, let eng = resources.english {
             return queryEnglish(String(input.dropFirst()), dict: eng)
         }
         // Pinyin reverse lookup only kicks in for 3+ character inputs starting
@@ -460,6 +620,14 @@ public final class Engine {
             return queryPinyin(input, dict: py)
         }
         return queryMain(input)
+    }
+
+    private var englishAvailable: Bool {
+        config.enableTempEnglish && resources.english != nil
+    }
+
+    private var isEnglishBuffer: Bool {
+        buffer.hasPrefix("'") && englishAvailable
     }
 
     /// True when the current composition is being handled as pinyin reverse
@@ -480,21 +648,23 @@ public final class Engine {
         let skipFilter = input.hasPrefix("v")
         for e in hits {
             if !skipFilter && !gb2312.accepts(e.text) { continue }
-            out.append(DisplayCandidate(text: e.text, annotation: e.code, source: .main))
+            out.append(DisplayCandidate(
+                text: e.text,
+                code: e.code,
+                annotation: annotate(text: e.text, code: e.code, pinyin: nil),
+                source: .main
+            ))
         }
         // Insert emoji suggestions right after the first matching candidate so
         // they land on page 1 rather than trailing the full result set.
         if config.enableEmoji, let first = out.first {
             let emojis = resources.emoji.emojis(for: first.text)
             if !emojis.isEmpty {
-                var insertAt = 1
-                for emoji in emojis {
-                    out.insert(
-                        DisplayCandidate(text: emoji, annotation: first.text, source: .emoji),
-                        at: insertAt
-                    )
-                    insertAt += 1
+                let emojiAnno = config.annotation == .none ? "" : first.text
+                let items = emojis.map {
+                    DisplayCandidate(text: $0, code: first.code, annotation: emojiAnno, source: .emoji)
                 }
+                out.insert(contentsOf: items, at: 1)
             }
         }
         return out
@@ -506,9 +676,14 @@ public final class Engine {
         var out: [DisplayCandidate] = []
         for e in hits {
             if !gb2312.accepts(e.text) { continue }
-            // Strip leading `i` from the annotation for display (xform/^i(.*)/$1/).
-            let shown = e.code.hasPrefix("i") ? String(e.code.dropFirst()) : e.code
-            out.append(DisplayCandidate(text: e.text, annotation: shown, source: .pinyin))
+            // Strip leading `i` for display (xform/^i(.*)/$1/).
+            let py = e.code.hasPrefix("i") ? String(e.code.dropFirst()) : e.code
+            out.append(DisplayCandidate(
+                text: e.text,
+                code: e.code,
+                annotation: annotate(text: e.text, code: codeIndex[e.text], pinyin: py),
+                source: .pinyin
+            ))
         }
         return out
     }
@@ -519,14 +694,82 @@ public final class Engine {
         let lastWord = input.split(separator: " ", omittingEmptySubsequences: false).last.map(String.init) ?? input
         guard !lastWord.isEmpty else { return [] }
         let hits = dict.lookup(prefix: lastWord, limit: 32)
-        return hits.map { DisplayCandidate(text: $0.text, annotation: "", source: .english) }
+        return hits.map {
+            DisplayCandidate(text: $0.text, code: $0.code, annotation: "", source: .english)
+        }
     }
 
-    private func topCandidate() -> DisplayCandidate? { allCandidates.first }
+    /// Build the display annotation for a candidate per `config.annotation`.
+    /// `code` / `pinyin` are looked up from the reverse indexes when nil.
+    private func annotate(text: String, code: String?, pinyin: String?) -> String {
+        switch config.annotation {
+        case .none:
+            return ""
+        case .code:
+            return code ?? ""
+        case .pinyin:
+            return pinyin ?? pinyinIndex[text] ?? ""
+        case .both:
+            let parts = [code, pinyin ?? pinyinIndex[text]].compactMap { $0 }.filter { !$0.isEmpty }
+            return parts.joined(separator: " ")
+        }
+    }
+
+    // MARK: - Reverse indexes
+
+    private func warmIndexes() {
+        // Build indexes the current config will need now, at startup or
+        // settings-change time, rather than on the first keystroke.
+        if config.enableTempPinyin && (config.annotation == .code || config.annotation == .both) {
+            _ = codeIndex
+        }
+        if config.annotation == .pinyin || config.annotation == .both {
+            _ = pinyinIndex
+        }
+    }
+
+    static func buildCodeIndex(_ table: CodeTable) -> [String: String] {
+        var best: [String: (code: String, weight: UInt32)] = [:]
+        best.reserveCapacity(table.count / 2)
+        for e in table.allEntries() {
+            if let cur = best[e.text] {
+                let curLen = cur.code.utf8.count, newLen = e.code.utf8.count
+                if newLen < curLen || (newLen == curLen && e.weight > cur.weight) {
+                    best[e.text] = (e.code, e.weight)
+                }
+            } else {
+                best[e.text] = (e.code, e.weight)
+            }
+        }
+        return best.mapValues(\.code)
+    }
+
+    /// At most two distinct readings per word, joined by `/` (e.g. 阿 → a/e).
+    static func buildPinyinIndex(_ table: CodeTable?) -> [String: String] {
+        guard let table else { return [:] }
+        var readings: [String: [String]] = [:]
+        for e in table.allEntries() {
+            let py = e.code.hasPrefix("i") ? String(e.code.dropFirst()) : e.code
+            guard !py.isEmpty else { continue }
+            var list = readings[e.text, default: []]
+            if list.count < 2 && !list.contains(py) {
+                list.append(py)
+                readings[e.text] = list
+            }
+        }
+        return readings.mapValues { $0.joined(separator: "/") }
+    }
+
+    // MARK: - Helpers
+
     private func topCandidateText() -> String? { allCandidates.first?.text }
 
+    private func englishPhrase() -> String {
+        String(buffer.dropFirst()).trimmingCharacters(in: .whitespaces)
+    }
+
     private func isSpellerChar(_ c: Character) -> Bool {
-        // Alphabet per cqlb schema: a-z plus ;,./
+        // Alphabet per cqlb schema: a-z plus ;,./ (and `'` for temp English).
         if let s = c.asciiValue {
             if s >= UInt8(ascii: "a") && s <= UInt8(ascii: "z") { return true }
             if c == "'" || c == ";" || c == "," || c == "." || c == "/" { return true }
@@ -536,6 +779,23 @@ public final class Engine {
 
     private func isOverlapPunct(_ c: Character) -> Bool {
         return c == "," || c == "." || c == "/" || c == ";"
+    }
+
+    private static func isPrintableASCII(_ c: Character) -> Bool {
+        guard let a = c.asciiValue else { return false }
+        return a > 0x20 && a < 0x7F
+    }
+
+    private static func isPrintable(_ c: Character) -> Bool {
+        if let a = c.asciiValue { return a > 0x20 && a < 0x7F }
+        // AppKit reports function keys (F1…, Home, End, forward delete …) as
+        // private-use scalars U+F700–U+F8FF; those are not text.
+        return !c.unicodeScalars.contains {
+            switch $0.properties.generalCategory {
+            case .control, .privateUse, .format, .unassigned, .surrogate: return true
+            default: return false
+            }
+        }
     }
 
     private func state() -> EngineState {
@@ -552,7 +812,8 @@ public final class Engine {
             hasPrevPage: page > 0,
             hasNextPage: end < allCandidates.count,
             isPinyinMode: isInPinyinMode(),
-            isEnglishMode: buffer.hasPrefix("'")
+            isEnglishMode: isEnglishBuffer,
+            isRawMode: !buffer.isEmpty && recognizer.match(buffer) != nil
         )
     }
 
