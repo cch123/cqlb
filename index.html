@@ -1,0 +1,433 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>超强两笔 · macOS 输入法</title>
+<meta name="description" content="macOS 上的超强两笔输入法。每个字取头两笔，最多四键上屏，重码少，无需辅助功能权限。">
+<meta property="og:title" content="超强两笔 · macOS 输入法">
+<meta property="og:description" content="每个字，取头两笔。最多四键上屏。">
+<meta property="og:type" content="website">
+<link rel="icon" type="image/png" href="assets/icon.png">
+<style>
+  /* Palette: paper, ink, cinnabar — a copybook (字帖) and manuscript-paper
+     (稿纸) sheet, since the product is about strokes and characters. */
+  :root {
+    --paper: #f3eee2;
+    --paper-2: #ebe5d6;
+    --ink: #1c1a16;
+    --muted: #6d665a;
+    --red: #c2311d;
+    --rule: rgba(28, 26, 22, 0.20);
+    --grid: rgba(194, 49, 29, 0.55);
+    --grid-faint: rgba(194, 49, 29, 0.30);
+    --serif: "Songti SC", "STSong", "Source Han Serif SC", "Noto Serif CJK SC", "SimSun", serif;
+    --sans: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --cell: clamp(104px, 17vw, 176px);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #16140f;
+      --paper-2: #1f1c15;
+      --ink: #ebe4d3;
+      --muted: #9c9483;
+      --red: #e25a43;
+      --rule: rgba(235, 228, 211, 0.22);
+      --grid: rgba(226, 90, 67, 0.60);
+      --grid-faint: rgba(226, 90, 67, 0.32);
+    }
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; color: var(--ink); background: var(--paper);
+    font: 16px/1.75 var(--sans);
+    -webkit-font-smoothing: antialiased;
+    /* paper grain */
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .5 0 0 0 0 .5 0 0 0 0 .5 0 0 0 .07 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+  a { color: inherit; text-decoration: underline; text-decoration-color: var(--red); text-underline-offset: 4px; text-decoration-thickness: 1.5px; }
+  a:hover { color: var(--red); }
+  code, kbd { font-family: var(--mono); }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 28px; }
+
+  /* ---- masthead ---- */
+  .mast { display: flex; align-items: baseline; gap: 26px; padding: 22px 0 14px; border-bottom: 2px solid var(--ink); font-size: 14.5px; }
+  .mast .name { font: 700 19px var(--serif); letter-spacing: 0.12em; margin-right: auto; text-decoration: none; }
+  .mast a { text-decoration: none; }
+  .mast a:hover { color: var(--red); }
+  .mast .issue { color: var(--muted); font-family: var(--mono); font-size: 12.5px; }
+
+  /* ---- hero: four copybook cells ---- */
+  .hero { display: grid; grid-template-columns: auto 1fr; gap: clamp(28px, 6vw, 76px); align-items: center; padding: clamp(40px, 7vw, 84px) 0 clamp(44px, 7vw, 80px); }
+  .tian { position: relative; display: grid; grid-template-columns: repeat(2, var(--cell)); border: 2.5px solid var(--red); }
+  .tian .zi {
+    position: relative; width: var(--cell); height: var(--cell); display: grid; place-items: center;
+    font: 900 calc(var(--cell) * 0.74) / 1 var(--serif);
+    border-right: 1.5px solid var(--grid); border-bottom: 1.5px solid var(--grid);
+  }
+  .tian .zi:nth-child(2n) { border-right: 0; }
+  .tian .zi:nth-child(n+3) { border-bottom: 0; }
+  /* dashed centre cross of a 田字格 */
+  .tian .zi::before, .tian .zi::after { content: ""; position: absolute; pointer-events: none; }
+  .tian .zi::before { left: 0; right: 0; top: 50%; border-top: 1.5px dashed var(--grid-faint); }
+  .tian .zi::after { top: 0; bottom: 0; left: 50%; border-left: 1.5px dashed var(--grid-faint); }
+  .tian .zi span { position: relative; z-index: 1; }
+  .tian .zi.hot { color: var(--red); }
+
+  .seal {
+    position: absolute; right: calc(var(--cell) * -0.20); bottom: calc(var(--cell) * -0.18); z-index: 2;
+    width: calc(var(--cell) * 0.50); height: calc(var(--cell) * 0.50);
+    background: var(--red); color: var(--paper); border-radius: 5px;
+    display: grid; place-items: center; transform: rotate(-5deg);
+    font: 900 calc(var(--cell) * 0.165) / 1.12 var(--serif);
+    writing-mode: vertical-rl; letter-spacing: 0.04em;
+    box-shadow: inset 0 0 0 2.5px var(--red), inset 0 0 0 4px var(--paper);
+  }
+
+  .eyebrow { font: 12.5px var(--mono); letter-spacing: 0.14em; color: var(--red); text-transform: uppercase; }
+  .hero h1 { font: 900 clamp(34px, 5vw, 58px) / 1.18 var(--serif); margin: 14px 0 18px; letter-spacing: 0.02em; }
+  .hero h1 em { font-style: normal; color: var(--red); }
+  .hero p { margin: 0 0 28px; color: var(--muted); font-size: 17px; max-width: 30em; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 10px; text-decoration: none;
+    font: 700 17px var(--serif); letter-spacing: 0.08em; padding: 13px 24px;
+    background: var(--ink); color: var(--paper); border: 2px solid var(--ink);
+    box-shadow: 5px 5px 0 var(--red); transition: transform 0.12s, box-shadow 0.12s;
+  }
+  .btn:hover { color: var(--paper); transform: translate(2px, 2px); box-shadow: 3px 3px 0 var(--red); }
+  .btn:active { transform: translate(5px, 5px); box-shadow: 0 0 0 var(--red); }
+  .meta { margin-top: 20px; font: 12.5px var(--mono); color: var(--muted); }
+  .meta a { text-decoration-thickness: 1px; }
+
+  /* ---- section heads ---- */
+  section { padding: clamp(44px, 6vw, 72px) 0 0; }
+  .head { display: flex; align-items: baseline; gap: 16px; border-bottom: 1px solid var(--ink); padding-bottom: 10px; margin-bottom: 30px; }
+  .head h2 { font: 900 clamp(26px, 3.4vw, 36px) / 1.2 var(--serif); margin: 0; letter-spacing: 0.04em; }
+  .head .no { font: 12.5px var(--mono); color: var(--red); letter-spacing: 0.14em; margin-left: auto; }
+  .lead { color: var(--muted); max-width: 40em; margin: -12px 0 30px; }
+
+  /* ---- demo: manuscript paper ---- */
+  .desk { position: relative; padding: 26px 0 150px; }
+  .keys { display: flex; align-items: center; gap: 8px; min-height: 40px; margin-bottom: 20px; font: 13px var(--mono); color: var(--muted); }
+  .keys .cap {
+    width: 36px; height: 36px; display: grid; place-items: center; font: 600 16px var(--mono); color: var(--ink);
+    border: 1.5px solid var(--ink); background: var(--paper); box-shadow: 2.5px 2.5px 0 var(--ink);
+    animation: press 0.16s ease-out;
+  }
+  .keys .cap.wide { width: auto; padding: 0 10px; font-family: var(--sans); font-size: 13px; }
+  @keyframes press { from { transform: translate(2.5px, 2.5px); box-shadow: 0 0 0 var(--ink); } }
+  .gaozhi { display: grid; grid-template-columns: repeat(var(--cols, 10), 1fr); border-top: 1.5px solid var(--grid); border-left: 1.5px solid var(--grid); }
+  .gaozhi .ge {
+    aspect-ratio: 1; display: grid; place-items: center; position: relative;
+    border-right: 1.5px solid var(--grid); border-bottom: 1.5px solid var(--grid);
+    font: 700 clamp(22px, 4.6vw, 46px) / 1 var(--serif);
+  }
+  .gaozhi .ge.new { animation: ink 0.45s ease-out; }
+  @keyframes ink { from { opacity: 0; transform: scale(1.25); filter: blur(3px); } }
+  .gaozhi .ge.cur::after { content: ""; position: absolute; left: 16%; top: 22%; bottom: 22%; width: 2px; background: var(--red); animation: blink 1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+  .gaozhi .ge .buf { font: 600 clamp(11px, 1.9vw, 17px) var(--mono); color: var(--red); letter-spacing: 0.02em; }
+
+  /* candidate strip, print style: hard edges, offset shadow, inverted pick */
+  .strip {
+    position: absolute; display: flex; background: var(--paper); border: 1.5px solid var(--ink);
+    box-shadow: 5px 5px 0 var(--ink); white-space: nowrap; opacity: 0; transition: opacity 0.1s;
+    max-width: 100%; overflow: hidden;
+  }
+  .strip.on { opacity: 1; }
+  .strip .c { display: flex; align-items: baseline; gap: 7px; padding: 8px 13px; font: 700 20px var(--serif); border-right: 1px solid var(--rule); }
+  .strip .c:last-child { border-right: 0; }
+  .strip .c .n { font: 11.5px var(--mono); color: var(--muted); }
+  .strip .c .h { font: 600 12.5px var(--mono); color: var(--red); }
+  .strip .c.pick { background: var(--ink); color: var(--paper); }
+  .strip .c.pick .n { color: var(--paper); opacity: 0.6; }
+  .strip .c.pick .h { color: var(--paper); }
+  .caption { font-size: 14px; color: var(--muted); border-left: 3px solid var(--red); padding-left: 14px; max-width: 46em; }
+
+  /* ---- features: numbered entries, not cards ---- */
+  .entries { display: grid; grid-template-columns: repeat(2, 1fr); column-gap: clamp(28px, 5vw, 64px); }
+  .entry { display: grid; grid-template-columns: 58px 1fr; gap: 6px 14px; padding: 22px 0; border-bottom: 1px solid var(--rule); }
+  .entry .num { grid-row: span 2; font: 900 40px / 1 var(--serif); color: var(--red); }
+  .entry h3 { font: 700 20px / 1.3 var(--serif); margin: 2px 0 0; letter-spacing: 0.03em; }
+  .entry p { margin: 0; color: var(--muted); font-size: 15.5px; }
+  .entry code { color: var(--ink); background: var(--paper-2); padding: 0 5px; border: 1px solid var(--rule); }
+
+  /* ---- figure ---- */
+  figure { margin: 0; }
+  .plate { border: 1.5px solid var(--ink); box-shadow: 8px 8px 0 var(--ink); line-height: 0; background: var(--paper-2); }
+  .plate img { width: 100%; height: auto; display: block; }
+  figcaption { margin-top: 22px; font-size: 14px; color: var(--muted); }
+  figcaption b { font: 700 14px var(--serif); color: var(--red); letter-spacing: 0.1em; margin-right: 8px; }
+
+  /* ---- install ---- */
+  .steps { list-style: none; counter-reset: s; margin: 0; padding: 0; }
+  .steps li { counter-increment: s; display: grid; grid-template-columns: 58px 1fr; gap: 14px; padding: 20px 0; border-bottom: 1px solid var(--rule); }
+  .steps li::before { content: counter(s, cjk-ideographic); font: 900 34px / 1.1 var(--serif); color: var(--red); }
+  .steps h3 { font: 700 19px / 1.35 var(--serif); margin: 0 0 4px; letter-spacing: 0.03em; }
+  .steps p { margin: 0; color: var(--muted); font-size: 15.5px; }
+  .steps b { color: var(--ink); font-weight: 600; }
+  .aside { margin-top: 22px; font-size: 14.5px; color: var(--muted); }
+
+  /* ---- keys table ---- */
+  table { width: 100%; border-collapse: collapse; font-size: 15.5px; }
+  td { padding: 12px 0; border-bottom: 1px solid var(--rule); }
+  td:first-child { font: 600 16.5px var(--serif); letter-spacing: 0.03em; }
+  td:last-child { text-align: right; color: var(--muted); }
+  kbd.k { display: inline-block; min-width: 28px; text-align: center; padding: 1px 7px; margin: 0 2px; font-size: 13px; color: var(--ink); border: 1.5px solid var(--ink); background: var(--paper); box-shadow: 2px 2px 0 var(--ink); }
+
+  /* ---- colophon ---- */
+  footer { margin-top: clamp(56px, 8vw, 96px); border-top: 2px solid var(--ink); padding: 22px 0 54px; display: grid; grid-template-columns: 1fr auto; gap: 18px; font-size: 13.5px; color: var(--muted); }
+  footer .r { text-align: right; }
+  footer p { margin: 0 0 4px; }
+
+  @media (max-width: 760px) {
+    .hero { grid-template-columns: 1fr; }
+    .tian { justify-self: start; margin-bottom: 18px; }
+    .entries { grid-template-columns: 1fr; }
+    .mast .opt { display: none; }
+    .gaozhi { --cols: 6; }
+    .strip .c { padding: 7px 9px; font-size: 17px; }
+    .strip .c:nth-child(n+4) { display: none; }
+    td:last-child { font-size: 14px; }
+    footer { grid-template-columns: 1fr; }
+    footer .r { text-align: left; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+    html { scroll-behavior: auto; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <nav class="mast">
+    <a class="name" href="#">超强两笔</a>
+    <a class="opt" href="#features">功能</a>
+    <a class="opt" href="#install">安装</a>
+    <a class="opt" href="#keys">按键</a>
+    <a href="https://github.com/cch123/cqlb">源代码</a>
+    <span class="issue" id="issue">macOS 14+</span>
+  </nav>
+
+  <header class="hero">
+    <div class="tian" aria-label="超强两笔">
+      <div class="zi"><span>超</span></div>
+      <div class="zi"><span>强</span></div>
+      <div class="zi hot"><span>两</span></div>
+      <div class="zi hot"><span>笔</span></div>
+      <div class="seal" aria-hidden="true">四键上屏</div>
+    </div>
+    <div>
+      <div class="eyebrow">macOS 输入法 · 开源</div>
+      <h1>每个字，<br>只取<em>头两笔</em>。</h1>
+      <p>单字、词组最多四键。打满四键没有重码就直接上屏，不用按空格，也不用在一长串候选里找字。</p>
+      <a class="btn" href="https://github.com/cch123/cqlb/releases/latest/download/cqlb-ime-installer.pkg">下载安装包 ↓</a>
+      <div class="meta"><span id="ver">最新版</span> · pkg · 约 5 MB · <a href="https://github.com/cch123/cqlb/releases/latest">更新说明</a></div>
+    </div>
+  </header>
+
+  <section id="demo">
+    <div class="head"><h2>打字示范</h2><span class="no">壹 / DEMO</span></div>
+    <div class="desk">
+      <div class="keys" id="keys" aria-hidden="true"></div>
+      <div class="gaozhi" id="gaozhi" aria-label="输入演示"></div>
+      <div class="strip" id="strip" aria-hidden="true"></div>
+    </div>
+    <p class="caption">候选词旁边的红色小字，是这个词<b>还没按的键</b>，已经打过的编码不再重复。「你好」和「您好」编码相同，这时不会自动上屏，停下来让你选。</p>
+  </section>
+
+  <section id="features">
+    <div class="head"><h2>功能</h2><span class="no">贰 / FEATURES</span></div>
+    <div class="entries">
+      <div class="entry"><div class="num">壹</div><h3>四键自动上屏</h3><p>每个方案约十二万词条。四键打满且无重码，字直接落到纸上。</p></div>
+      <div class="entry"><div class="num">贰</div><h3>只提示还没按的键</h3><p>候选窗不复述你打过的编码，只告诉你下一键按什么，学码表的时候尤其省眼睛。</p></div>
+      <div class="entry"><div class="num">叁</div><h3>两种编码方案</h3><p>超强两笔之外，也内置超强音形：编码只用 26 个字母。在设置里切换，立即生效。</p></div>
+      <div class="entry"><div class="num">肆</div><h3>拼音反查，临时英文</h3><p>不会拆的字，以 <code>i</code> 开头打拼音，旁边给出它的编码。以 <code>'</code> 开头则临时输入英文。</p></div>
+      <div class="entry"><div class="num">伍</div><h3>用户词库</h3><p>一个文本文件，一行一个词。不写编码就按构词规则自动编码，保存即生效。</p></div>
+      <div class="entry"><div class="num">陆</div><h3>不要权限</h3><p>标准的系统输入法，由 macOS 按需加载。不需要辅助功能权限，不常驻登录项。</p></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="head"><h2>键位与设置</h2><span class="no">叁 / SETTINGS</span></div>
+    <figure>
+      <div class="plate">
+        <picture>
+          <source srcset="assets/keymap-dark.jpg" media="(prefers-color-scheme: dark)">
+          <img src="assets/keymap-light.jpg" width="1680" height="1320" alt="设置里的键位页：超强两笔的键位图，三排按键按撇区、点区、竖区、横区、单笔画区、折区着色，下方是取码规则" loading="lazy">
+        </picture>
+      </div>
+      <figcaption><b>图一</b>键位图和取码规则就在设置里。每个键是一组头两笔，十个偏旁各占一键；两种方案的图可以切换着看。</figcaption>
+    </figure>
+    <figure style="margin-top: 44px">
+      <div class="plate">
+        <picture>
+          <source srcset="assets/settings-dark.jpg" media="(prefers-color-scheme: dark)">
+          <img src="assets/settings-light.jpg" width="1680" height="1320" alt="设置里的外观页：顶部是候选窗口的实时预览" loading="lazy">
+        </picture>
+      </div>
+      <figcaption><b>图二</b>设置窗口开在输入法自己的进程里，从菜单栏的输入法菜单进入，不用另装一个 app。六种强调色，横排竖排，改动立即生效。</figcaption>
+    </figure>
+  </section>
+
+  <section id="install">
+    <div class="head"><h2>安装</h2><span class="no">肆 / INSTALL</span></div>
+    <ol class="steps">
+      <li><div><h3>下载并打开安装包</h3><p>下载 <a href="https://github.com/cch123/cqlb/releases/latest/download/cqlb-ime-installer.pkg">cqlb-ime-installer.pkg</a>，双击打开。</p></div></li>
+      <li><div><h3>允许安装包运行</h3><p>安装包本身尚未签名，首次打开会被 macOS 拦下。到 <b>系统设置 → 隐私与安全性</b>，在页面底部点「仍要打开」，再按提示装完。输入法程序本身已通过 Apple 公证。</p></div></li>
+      <li><div><h3>添加输入法</h3><p>到 <b>系统设置 → 键盘 → 文本输入 → 输入法</b>，点 <b>+</b>，在「简体中文」里选「超强两笔」。</p></div></li>
+    </ol>
+    <p class="aside">不想用安装包：下载 <a href="https://github.com/cch123/cqlb/releases/latest/download/cqlb-ime-notarized.zip">cqlb-ime-notarized.zip</a>，解压后把 <code>cqlb-ime.app</code> 放进 <code>/Library/Input Methods/</code>，注销并重新登录。</p>
+  </section>
+
+  <section id="keys">
+    <div class="head"><h2>按键</h2><span class="no">伍 / KEYS</span></div>
+    <table>
+      <tr><td>切换中英文</td><td><kbd class="k">⌥</kbd><kbd class="k">空格</kbd>，或单击 <kbd class="k">Shift</kbd></td></tr>
+      <tr><td>选候选词</td><td><kbd class="k">1</kbd>–<kbd class="k">9</kbd>，或鼠标点击</td></tr>
+      <tr><td>上屏高亮的词</td><td><kbd class="k">空格</kbd></td></tr>
+      <tr><td>移动高亮</td><td><kbd class="k">↑</kbd><kbd class="k">↓</kbd><kbd class="k">←</kbd><kbd class="k">→</kbd><kbd class="k">Tab</kbd></td></tr>
+      <tr><td>翻页</td><td><kbd class="k">-</kbd><kbd class="k">=</kbd></td></tr>
+      <tr><td>拼音反查</td><td><kbd class="k">i</kbd> 加拼音</td></tr>
+      <tr><td>临时英文</td><td><kbd class="k">'</kbd> 加英文</td></tr>
+      <tr><td>上屏原始输入</td><td><kbd class="k">回车</kbd></td></tr>
+      <tr><td>清空输入</td><td><kbd class="k">Esc</kbd></td></tr>
+    </table>
+  </section>
+
+  <footer>
+    <div>
+      <p>码表：付东升《超强两笔》8.1.3、《超强音形》5.3。码表格式来自 Rime，Emoji 数据来自 OpenCC。</p>
+      <p>以 MIT 许可证开源。</p>
+    </div>
+    <div class="r">
+      <p><a href="https://github.com/cch123/cqlb">源代码</a></p>
+      <p><a href="https://github.com/cch123/cqlb/issues">反馈问题</a></p>
+    </div>
+  </footer>
+</div>
+
+<script>
+// Typing demo on a row of manuscript-paper cells. Candidate data comes from
+// the real code table; the red text is the keys still to press.
+(function () {
+  var words = [
+    { keys: "zggg", out: "中国", cands: [
+      [["在", ""], ["杂", ","], ["翟", "."], ["组", "/"], ["转", ";"]],
+      [["中", ""], ["助", ","], ["贼", ";"], ["罪", "a"], ["胄", "d"]],
+      [["崽", ""], ["赠给", "/"], ["政工干部", "b"], ["中关村", "c"], ["中国共产党", "d"]]
+    ] },
+    { keys: "sjjg", out: "世界", cands: [
+      [["是", ""], ["始", ","], ["双", "."], ["书", "/"], ["式", ";"]],
+      [["十", ""], ["⑩", ""], ["Ⅹ", ""], ["酸", "."], ["索", "/"]],
+      [["散架", ","], ["世纪", "/"], ["十戒", ";"], ["世界杯", "b"], ["世纪初", "c"]]
+    ] },
+    // Same code for 你好 / 您好: no auto-commit, space picks the first.
+    { keys: "nfh,", out: "你好", space: true, cands: [
+      [["你", ""], ["乃", ","], ["能", "."], ["纳", "/"], ["匿", ";"]],
+      [["您", ""], ["傩", "."], ["佡", "f"], ["佞", "h"], ["佴", "j"]],
+      [["佞", ""], ["你好", ","], ["您好", ","], ["拿获", "b"]],
+      [["你好", ""], ["您好", ""], ["佞", ""]]
+    ] }
+  ];
+
+  var grid = document.getElementById("gaozhi");
+  var keysEl = document.getElementById("keys");
+  var strip = document.getElementById("strip");
+  var cols = parseInt(getComputedStyle(grid).getPropertyValue("--cols")) || 10;
+  var cells = [];
+  for (var i = 0; i < cols; i++) {
+    var ge = document.createElement("div"); ge.className = "ge"; grid.appendChild(ge); cells.push(ge);
+  }
+  var pos = 0;
+
+  function el(tag, cls, text) { var e = document.createElement(tag); e.className = cls; e.textContent = text; return e; }
+
+  function showStrip(list) {
+    strip.textContent = "";
+    list.forEach(function (pair, n) {
+      var c = el("span", "c" + (n === 0 ? " pick" : ""), "");
+      c.appendChild(el("span", "n", n + 1));
+      c.appendChild(document.createTextNode(pair[0]));
+      if (pair[1]) c.appendChild(el("span", "h", pair[1]));
+      strip.appendChild(c);
+    });
+    var cell = cells[pos];
+    var maxLeft = grid.offsetWidth - strip.offsetWidth - 6;
+    strip.style.left = Math.max(0, Math.min(cell.offsetLeft, maxLeft)) + "px";
+    strip.style.top = (grid.offsetTop + cell.offsetHeight + 12) + "px";
+    strip.classList.add("on");
+  }
+
+  function setCursor() {
+    cells.forEach(function (c) { c.classList.remove("cur"); });
+    if (cells[pos]) cells[pos].classList.add("cur");
+  }
+
+  function commit(text) {
+    strip.classList.remove("on");
+    Array.from(text).forEach(function (ch) {
+      if (!cells[pos]) return;
+      cells[pos].textContent = ch;
+      cells[pos].classList.remove("cur");
+      cells[pos].classList.add("new");
+      pos++;
+    });
+    setCursor();
+  }
+
+  function reset() {
+    cells.forEach(function (c) { c.textContent = ""; c.className = "ge"; });
+    keysEl.textContent = ""; pos = 0; setCursor();
+  }
+
+  function play(wi) {
+    if (wi >= words.length || pos + 2 > cells.length) {
+      setTimeout(function () { reset(); play(0); }, 2800);
+      return;
+    }
+    var w = words[wi], k = 0;
+    keysEl.textContent = "";
+    (function next() {
+      if (k < w.keys.length) {
+        keysEl.appendChild(el("span", "cap", w.keys[k]));
+        var typed = w.keys.slice(0, k + 1);
+        cells[pos].textContent = "";
+        cells[pos].appendChild(el("span", "buf", typed));
+        cells[pos].classList.remove("cur");
+        var list = w.cands[k];
+        k++;
+        if (list) { showStrip(list); setTimeout(next, 640); }
+        else { setTimeout(function () { commit(w.out); setTimeout(function () { play(wi + 1); }, 900); }, 260); }
+      } else if (w.space) {
+        keysEl.appendChild(el("span", "cap wide", "空格"));
+        setTimeout(function () { commit(w.out); setTimeout(function () { play(wi + 1); }, 900); }, 420);
+      }
+    })();
+  }
+
+  reset();
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    commit("中国"); cells[pos].appendChild(el("span", "buf", "sjj")); cells[pos].classList.remove("cur");
+    showStrip(words[1].cands[2]);
+  } else {
+    setTimeout(function () { play(0); }, 600);
+  }
+
+  fetch("https://api.github.com/repos/cch123/cqlb/releases/latest")
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (d) {
+      if (d && d.tag_name) {
+        document.getElementById("ver").textContent = d.tag_name;
+        document.getElementById("issue").textContent = d.tag_name + " · macOS 14+";
+      }
+    })
+    .catch(function () {});
+})();
+</script>
+</body>
+</html>
