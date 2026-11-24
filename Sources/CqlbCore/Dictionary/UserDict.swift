@@ -14,13 +14,17 @@ import Foundation
 /// unmodified.
 public enum UserDict {
 
-    /// `~/Library/Application Support/cqlb/user.dict.yaml`
-    public static var url: URL {
-        ConfigStore.url.deletingLastPathComponent().appendingPathComponent("user.dict.yaml")
+    /// Per-scheme user dictionary, since codes are scheme-specific:
+    /// `~/Library/Application Support/cqlb/user.dict.yaml` for 两笔 (the
+    /// original name, kept for existing users) and `user.cqyx.dict.yaml`
+    /// for 音形.
+    public static func url(for scheme: Scheme) -> URL {
+        let name = scheme == .cqlb ? "user.dict.yaml" : "user.\(scheme.rawValue).dict.yaml"
+        return ConfigStore.url.deletingLastPathComponent().appendingPathComponent(name)
     }
 
     public static let template = """
-    # 超强两笔 用户词库
+    # 用户词库
     #
     # 每行一个词条，字段之间用 Tab 分隔（不能用空格）：
     #
@@ -37,9 +41,11 @@ public enum UserDict {
 
     """
 
-    /// Create the user dictionary with an explanatory template if absent.
-    public static func createTemplateIfMissing() {
+    /// Create the scheme's user dictionary with an explanatory template if
+    /// absent.
+    public static func createTemplateIfMissing(for scheme: Scheme) {
         let fm = FileManager.default
+        let url = url(for: scheme)
         guard !fm.fileExists(atPath: url.path) else { return }
         try? fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try? Data(template.utf8).write(to: url, options: [.atomic])

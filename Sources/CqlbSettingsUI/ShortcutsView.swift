@@ -44,7 +44,7 @@ struct ShortcutsView: View {
             }
 
             Card("编码") {
-                SettingRow("上屏原始输入", hint: "拼音和英文模式会去掉 i / ' 前缀") { KeyBadge("回车") }
+                SettingRow("上屏原始输入", hint: "拼音和英文模式会去掉 i / \(String(model.config.scheme.englishPrefix)) 前缀") { KeyBadge("回车") }
                 RowDivider()
                 SettingRow("删除一个编码") { KeyBadge("退格") }
                 RowDivider()

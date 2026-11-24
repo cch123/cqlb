@@ -434,3 +434,89 @@ final class RealDictEncoderTests: XCTestCase {
         }
     }
 }
+
+// MARK: - Schemes
+
+final class SchemeTests: XCTestCase {
+    private let table: [Entry] = [
+        Entry(text: "中", code: "zg", weight: 1),
+        Entry(text: "中国", code: "zggg", weight: 1),
+        Entry(text: "也", code: "ua", weight: 1),
+        Entry(text: "％", code: "vb", weight: 1),
+        Entry(text: "℃", code: "vc", weight: 1),
+        Entry(text: "°", code: "vc", weight: 1),
+        Entry(text: "群", code: "inih", weight: 1),
+        Entry(text: "群", code: "qvkd", weight: 1),
+    ]
+
+    private func cqyx(_ configure: (inout EngineConfig) -> Void = { _ in }) -> Engine {
+        makeEngine(main: table) { $0.scheme = .cqyx; configure(&$0) }
+    }
+
+    func testSemicolonStartsEnglishInCqyx() {
+        let e = cqyx()
+        e.type(";he")
+        XCTAssertTrue(e.currentState().isEnglishMode)
+        XCTAssertEqual(e.currentState().candidates.first?.text, "help")
+        XCTAssertEqual(committed(e.press(.enter)), "he")
+    }
+
+    func testSemicolonIsPunctuationWhenEnglishDisabledInCqyx() {
+        let e = cqyx { $0.enableTempEnglish = false }
+        XCTAssertEqual(committed(e.type(";")), "\u{FF1B}")
+        XCTAssertEqual(committed(e.type("zg;")), "中\u{FF1B}")
+    }
+
+    /// `, . /` are not code characters in 音形: they punctuate immediately.
+    func testCommaPunctuatesWhileComposingInCqyx() {
+        let e = cqyx()
+        XCTAssertEqual(committed(e.type("zg,")), "中\u{FF0C}")
+        XCTAssertEqual(e.currentState().preedit, "")
+    }
+
+    func testApostropheIsLiteralInCqyx() {
+        let e = cqyx()
+        XCTAssertEqual(committed(e.type("zg'")), "中'")
+    }
+
+    func testShortUVCodeAutoSelectsOnlyInCqyxAndOnlyWhenUnique() {
+        XCTAssertEqual(committed(cqyx().type("ua")), "也")
+        XCTAssertEqual(committed(cqyx().type("vb")), "％")
+        // Two entries share `vc`: stop and let the user choose.
+        let rivals = cqyx()
+        XCTAssertEqual(committed(rivals.type("vc")), "")
+        XCTAssertEqual(rivals.currentState().candidates.count, 2)
+        // 两笔 has no such rule.
+        let lb = makeEngine(main: table)
+        XCTAssertEqual(committed(lb.type("ua")), "")
+    }
+
+    func testFourKeyAutoSelectInCqyx() {
+        XCTAssertEqual(committed(cqyx().type("zggg")), "中国")
+    }
+
+    func testSwitchingSchemeAbandonsComposition() {
+        let e = makeEngine(main: table)
+        e.type("zg")
+        e.config.scheme = .cqyx
+        XCTAssertEqual(e.currentState().preedit, "")
+    }
+
+    /// `i` + 2 or more keys is pinyin mode, so an `i…` table code is not
+    /// typeable and must not be offered as the reverse-lookup answer.
+    func testReverseLookupSkipsUntypeableICodes() {
+        let e = makeEngine(
+            main: table,
+            pinyin: [Entry(text: "群", code: "iqun", weight: 0)]
+        )
+        e.type("iqun")
+        XCTAssertEqual(e.currentState().candidates.first?.annotation, "qvkd")
+    }
+
+    func testSchemeConfigDecoding() {
+        XCTAssertEqual(ConfigStore.decode(Data(#"{"scheme":"cqyx"}"#.utf8)).scheme, .cqyx)
+        XCTAssertEqual(ConfigStore.decode(Data(#"{"scheme":"bogus"}"#.utf8)).scheme, .cqlb)
+        XCTAssertEqual(ConfigStore.decode(Data("{}".utf8)).scheme, .cqlb)
+        XCTAssertNotEqual(UserDict.url(for: .cqlb), UserDict.url(for: .cqyx))
+    }
+}

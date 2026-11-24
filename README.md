@@ -8,7 +8,8 @@ macOS 标准输入法版本的超强两笔。最多四键上屏，重码少，�
 ## 功能特性
 
 **输入**
-- 超强两笔编码，最多四键上屏
+- 两种编码方案：超强两笔、超强音形，在设置里切换，立即生效
+- 最多四键上屏
 - 自动四码上屏
 - 支持临时拼音输入（编码前加 `i`）
 - 支持临时英文输入
@@ -94,7 +95,7 @@ make pkg-ime PKG_CERT_NAME="Developer ID Installer: Your Name (TEAMID)"
 | `Option` + `Space` | 切换中/英文模式（可在设置中改为 `Shift` + `Space` 或关闭） |
 | `Shift` 单击 | 快速切换中/英（<300ms，中间不按其他键或鼠标；可限定左/右 Shift 或关闭） |
 | `i` + 拼音 | 临时拼音反查 |
-| `'` + 英文 | 临时英文输入（空格连词，`Enter` 上屏） |
+| `'` + 英文 | 临时英文输入（空格连词，`Enter` 上屏）；超强音形方案下引导键是 `;` |
 | 数字键 `1`-`9` / 鼠标点击 | 选择对应候选词 |
 | `Space` | 上屏高亮候选词 |
 | `Enter` | 上屏原始输入 |
@@ -126,7 +127,8 @@ make pkg-ime PKG_CERT_NAME="Developer ID Installer: Your Name (TEAMID)"
 | 类别 | 选项 |
 |------|------|
 | 外观 | 字体、字号、候选词数量、横排/竖排、光效、是否显示编码行、配色方案、强调色 |
-| 功能 | Emoji 联想、GB2312 过滤、临时英文、临时拼音、候选注释（编码/拼音） |
+| 功能 | 编码方案（超强两笔 / 超强音形）、Emoji 联想、GB2312 过滤、临时英文、临时拼音、候选注释（编码/拼音） |
+| 键位 | 两种方案的键位图和取码规则（只读） |
 | 快捷键 | 中英切换键、Shift 单击切换 |
 
 ### 用户词库
@@ -136,6 +138,8 @@ make pkg-ime PKG_CERT_NAME="Developer ID Installer: Your Name (TEAMID)"
 ```
 ~/Library/Application Support/cqlb/user.dict.yaml
 ```
+
+超强音形的词库是同目录下的 `user.cqyx.dict.yaml`，两个方案互不影响。
 
 每行一个词条，字段用 Tab 分隔，保存后立即生效：
 

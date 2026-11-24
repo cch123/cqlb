@@ -164,12 +164,14 @@ final class CqlbInputController: IMKInputController {
     func openUserDictMenuItem() {
         Log.imk.log("open user dictionary requested")
         DispatchQueue.main.async {
-            UserDict.createTemplateIfMissing()
+            // The dictionary of the scheme currently in use.
+            let scheme = EngineHost.shared.currentConfig.scheme
+            UserDict.createTemplateIfMissing(for: scheme)
             // Open as plain text regardless of the .yaml handler; edits are
             // picked up by EngineHost's directory watcher on save.
             let config = NSWorkspace.OpenConfiguration()
             let textEdit = URL(fileURLWithPath: "/System/Applications/TextEdit.app")
-            NSWorkspace.shared.open([UserDict.url], withApplicationAt: textEdit, configuration: config)
+            NSWorkspace.shared.open([UserDict.url(for: scheme)], withApplicationAt: textEdit, configuration: config)
         }
     }
 

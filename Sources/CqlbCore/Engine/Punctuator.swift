@@ -57,9 +57,15 @@ public final class Punctuator: @unchecked Sendable {
     /// Look up punctuation. `bufferEmpty` guards the alphabet-overlap chars.
     /// Returns nil when no translation applies and the char should flow through
     /// normal handling.
-    public func translate(_ char: Character, bufferEmpty: Bool) -> String? {
+    ///
+    /// `codePunctuation` is the scheme's set of punctuation keys that double
+    /// as code characters (`; , . /` for 两笔, none for 音形).
+    public func translate(
+        _ char: Character,
+        bufferEmpty: Bool,
+        codePunctuation overlapChars: Set<Character> = [",", ".", "/", ";"]
+    ) -> String? {
         // Alphabet-overlap chars: only emit punctuation when buffer is empty.
-        let overlapChars: Set<Character> = [",", ".", "/", ";"]
         if overlapChars.contains(char) && !bufferEmpty {
             return nil
         }

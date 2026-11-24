@@ -48,7 +48,8 @@ endif
 CLANG_MODULE_CACHE_PATH ?= $(CURDIR)/.build/module-cache
 export CLANG_MODULE_CACHE_PATH
 
-DICT_FILES   := cqlb.dict.yaml cqlb.src.dict.yaml ipinyin.dict.yaml \
+DICT_FILES   := cqlb.dict.yaml cqlb.src.dict.yaml \
+                cqyx.dict.yaml cqyx.src.dict.yaml ipinyin.dict.yaml \
                 english.dict.yaml emoji_word.txt emoji_category.txt
 
 .PHONY: build install clean uninstall test preview build-ime bundle-ime install-ime notarize-ime package-ime pkg-ime package-installer uninstall-ime

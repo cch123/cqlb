@@ -11,6 +11,7 @@ public struct EngineConfig: Sendable, Equatable {
     public var enableGb2312: Bool
     public var enableRecognizer: Bool
     public var annotation: Annotation
+    public var scheme: Scheme
 
     /// What to show next to each candidate.
     ///
@@ -31,7 +32,8 @@ public struct EngineConfig: Sendable, Equatable {
         enableEmoji: true,
         enableGb2312: true,
         enableRecognizer: true,
-        annotation: .code
+        annotation: .code,
+        scheme: .cqlb
     )
 
     public init(
@@ -43,7 +45,8 @@ public struct EngineConfig: Sendable, Equatable {
         enableEmoji: Bool,
         enableGb2312: Bool,
         enableRecognizer: Bool,
-        annotation: Annotation = .code
+        annotation: Annotation = .code,
+        scheme: Scheme = .cqlb
     ) {
         self.candidateCount = candidateCount
         self.maxCodeLength = maxCodeLength
@@ -54,6 +57,7 @@ public struct EngineConfig: Sendable, Equatable {
         self.enableGb2312 = enableGb2312
         self.enableRecognizer = enableRecognizer
         self.annotation = annotation
+        self.scheme = scheme
     }
 }
 
@@ -174,6 +178,8 @@ public final class Engine {
             if config.enableRecognizer != recognizer.isEnabled {
                 recognizer = Recognizer(enabled: config.enableRecognizer)
             }
+            // Codes of one scheme mean nothing in the other.
+            if config.scheme != oldValue.scheme { reset() }
             if config != oldValue { warmIndexes() }
         }
     }
@@ -287,24 +293,28 @@ public final class Engine {
             return handleCharOnEmptyBuffer(char)
         }
 
-        // `'` while composing: commit what we have, then enter temp English
-        // (or emit a literal `'` if temp English is unavailable). Previously
-        // the `'` was appended to the cqlb code, the lookup came back empty
-        // and the whole composition was silently discarded.
-        if char == "'" {
+        // Temp-English prefix (`'` in 两笔, `;` in 音形) while composing:
+        // commit what we have, then enter temp English. If temp English is
+        // unavailable the key is emitted after the commit instead — as
+        // punctuation when it has a mapping (`;` → ；), else literally.
+        // Previously the `'` was appended to the code, the lookup came back
+        // empty and the whole composition was silently discarded.
+        if char == englishPrefix {
             let flushed = topCandidateText() ?? displayPreedit()
             reset()
             if englishAvailable {
-                buffer = "'"
+                buffer = String(englishPrefix)
                 recompute()
                 return .commit(flushed, state: state())
             }
-            return .commit(flushed + "'", state: state())
+            let tail = punctuator.translate(char, bufferEmpty: true, codePunctuation: codePunctuation)
+                ?? String(char)
+            return .commit(flushed + tail, state: state())
         }
 
         // Non-overlap punctuation: flush the top candidate, then emit the
         // Chinese punctuation after it.
-        if let punctOut = punctuator.translate(char, bufferEmpty: false) {
+        if let punctOut = punctuator.translate(char, bufferEmpty: false, codePunctuation: codePunctuation) {
             let flushed = topCandidateText() ?? displayPreedit()
             reset()
             return .commit(flushed + punctOut, state: state())
@@ -343,7 +353,7 @@ public final class Engine {
                 newParts.append(Substring(chosen.text))
                 buffer = newParts.joined(separator: " ") + " "
             } else {
-                buffer = "'" + chosen.text + " "
+                buffer = String(englishPrefix) + chosen.text + " "
             }
             recompute()
             return .update(state())
@@ -356,12 +366,17 @@ public final class Engine {
     // MARK: - Character handling
 
     private func handleCharOnEmptyBuffer(_ char: Character) -> EngineResult {
-        // `'` only starts temp English when that mode is usable; otherwise
-        // let the literal apostrophe through instead of swallowing it.
-        if char == "'" && !englishAvailable {
+        // The temp-English prefix starts that mode when it is usable. This
+        // must precede punctuation: 音形's prefix `;` also maps to ；.
+        if char == englishPrefix && englishAvailable {
+            return extendComposition(with: char)
+        }
+        // `'` with temp English unavailable: let the literal apostrophe
+        // through instead of swallowing it.
+        if char == "'" && englishPrefix == "'" {
             return .passthrough
         }
-        if let punctOut = punctuator.translate(char, bufferEmpty: true) {
+        if let punctOut = punctuator.translate(char, bufferEmpty: true, codePunctuation: codePunctuation) {
             return .commit(punctOut, state: state())
         }
         if isSpellerChar(char) {
@@ -404,7 +419,7 @@ public final class Engine {
             if probe.isEmpty {
                 let prevTop = topCandidateText() ?? displayPreedit()
                 reset()
-                if let punctOut = punctuator.translate(char, bufferEmpty: true) {
+                if let punctOut = punctuator.translate(char, bufferEmpty: true, codePunctuation: codePunctuation) {
                     return .commit(prevTop + punctOut, state: state())
                 }
                 return .commit(prevTop + String(char), state: state())
@@ -447,6 +462,21 @@ public final class Engine {
             }
             if !hasRival {
                 let text = first.text
+                reset()
+                return .commit(text, state: state())
+            }
+        }
+
+        // 音形: a two-key `u?` / `v?` code commits by itself when it is the
+        // only match (schema `auto_select_pattern: (^[uv].$)|^.{4}$`).
+        if config.autoSelect,
+           config.scheme.autoSelectsShortUV,
+           buffer.count == 2,
+           let lead = buffer.first, lead == "u" || lead == "v"
+        {
+            let mains = allCandidates.filter { $0.source == .main }
+            if mains.count == 1, mains[0].code == buffer {
+                let text = mains[0].text
                 reset()
                 return .commit(text, state: state())
             }
@@ -603,7 +633,7 @@ public final class Engine {
         guard let first = input.first else { return [] }
 
         // Prefix dispatch.
-        if first == "'" && englishAvailable, let eng = resources.english {
+        if first == englishPrefix && englishAvailable, let eng = resources.english {
             return queryEnglish(String(input.dropFirst()), dict: eng)
         }
         // Pinyin reverse lookup only kicks in for 3+ character inputs starting
@@ -627,8 +657,11 @@ public final class Engine {
     }
 
     private var isEnglishBuffer: Bool {
-        buffer.hasPrefix("'") && englishAvailable
+        buffer.first == englishPrefix && englishAvailable
     }
+
+    private var englishPrefix: Character { config.scheme.englishPrefix }
+    private var codePunctuation: Set<Character> { config.scheme.codePunctuation }
 
     /// True when the current composition is being handled as pinyin reverse
     /// lookup rather than main cqlb lookup.
@@ -732,6 +765,9 @@ public final class Engine {
         var best: [String: (code: String, weight: UInt32)] = [:]
         best.reserveCapacity(table.count / 2)
         for e in table.allEntries() {
+            // `i` + 2 or more keys is pinyin reverse lookup, so such codes
+            // cannot be typed as table codes; never suggest them.
+            if e.code.first == "i" && e.code.utf8.count >= 3 { continue }
             if let cur = best[e.text] {
                 let curLen = cur.code.utf8.count, newLen = e.code.utf8.count
                 if newLen < curLen || (newLen == curLen && e.weight > cur.weight) {
@@ -769,16 +805,14 @@ public final class Engine {
     }
 
     private func isSpellerChar(_ c: Character) -> Bool {
-        // Alphabet per cqlb schema: a-z plus ;,./ (and `'` for temp English).
-        if let s = c.asciiValue {
-            if s >= UInt8(ascii: "a") && s <= UInt8(ascii: "z") { return true }
-            if c == "'" || c == ";" || c == "," || c == "." || c == "/" { return true }
-        }
-        return false
+        // a–z, the scheme's code punctuation (两笔: ; , . /), and the
+        // temp-English prefix.
+        if let s = c.asciiValue, s >= UInt8(ascii: "a") && s <= UInt8(ascii: "z") { return true }
+        return codePunctuation.contains(c) || c == englishPrefix
     }
 
     private func isOverlapPunct(_ c: Character) -> Bool {
-        return c == "," || c == "." || c == "/" || c == ";"
+        codePunctuation.contains(c)
     }
 
     private static func isPrintableASCII(_ c: Character) -> Bool {

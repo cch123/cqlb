@@ -4,6 +4,8 @@ import Foundation
 /// JSON file at `~/Library/Application Support/cqlb/config.json`.
 public struct Config: Codable, Sendable, Equatable {
     public var version: Int = 1
+    /// Encoding scheme (code table). Switching takes effect immediately.
+    public var scheme: Scheme = .cqlb
     public var appearance: Appearance = .init()
     public var functions: Functions = .init()
     public var shortcuts: Shortcuts = .init()
@@ -86,6 +88,7 @@ extension Config {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         let d = Config()
         version = c.value(.version, default: d.version)
+        scheme = c.value(.scheme, default: d.scheme)
         appearance = c.value(.appearance, default: d.appearance)
         functions = c.value(.functions, default: d.functions)
         shortcuts = c.value(.shortcuts, default: d.shortcuts)
@@ -172,7 +175,8 @@ public extension EngineConfig {
             enableEmoji: config.functions.emojiSuggestion,
             enableGb2312: config.functions.gb2312Filter,
             enableRecognizer: true,
-            annotation: EngineConfig.Annotation(config.functions.reverseLookupDisplay)
+            annotation: EngineConfig.Annotation(config.functions.reverseLookupDisplay),
+            scheme: config.scheme
         )
     }
 }

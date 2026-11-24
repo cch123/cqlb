@@ -24,6 +24,7 @@ struct RootView: View {
     enum Pane: String, CaseIterable, Identifiable, Hashable {
         case appearance = "外观"
         case functions  = "功能"
+        case keymap     = "键位"
         case shortcuts  = "快捷键"
         case about      = "关于"
 
@@ -33,6 +34,7 @@ struct RootView: View {
             switch self {
             case .appearance: return "paintbrush.pointed.fill"
             case .functions:  return "wand.and.stars"
+            case .keymap:     return "keyboard"
             case .shortcuts:  return "command"
             case .about:      return "info"
             }
@@ -42,6 +44,7 @@ struct RootView: View {
             switch self {
             case .appearance: return .pink
             case .functions:  return .indigo
+            case .keymap:     return .teal
             case .shortcuts:  return .orange
             case .about:      return .gray
             }
@@ -50,7 +53,8 @@ struct RootView: View {
         var subtitle: String {
             switch self {
             case .appearance: return "候选窗口的字体、布局和配色"
-            case .functions:  return "输入辅助、候选词过滤和用户词库"
+            case .functions:  return "编码方案、输入辅助和用户词库"
+            case .keymap:     return "键位图和取码规则"
             case .shortcuts:  return "切换中英文和操作候选词的按键"
             case .about:      return "版本信息与致谢"
             }
@@ -158,6 +162,7 @@ struct RootView: View {
                 switch selection {
                 case .appearance: AppearanceView(model: model)
                 case .functions:  FunctionsView(model: model)
+                case .keymap:     KeymapView(model: model)
                 case .shortcuts:  ShortcutsView(model: model)
                 case .about:      AboutView(accent: accent)
                 }

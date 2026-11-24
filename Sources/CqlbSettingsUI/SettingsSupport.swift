@@ -88,7 +88,7 @@ public final class SettingsWindowPresenter: NSObject, NSWindowDelegate {
         // controller afterward bypasses the binding path while keeping the
         // same visible window behavior.
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 780, height: 620),
+            contentRect: NSRect(x: 0, y: 0, width: 840, height: 660),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
@@ -110,7 +110,7 @@ public final class SettingsWindowPresenter: NSObject, NSWindowDelegate {
         window.toolbarStyle = .unified
         window.isMovableByWindowBackground = true
         window.minSize = NSSize(width: 700, height: 520)
-        window.setContentSize(NSSize(width: 780, height: 620))
+        window.setContentSize(NSSize(width: 840, height: 660))
         window.isReleasedWhenClosed = false
         window.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
         window.delegate = self

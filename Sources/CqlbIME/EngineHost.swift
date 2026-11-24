@@ -16,13 +16,22 @@ final class EngineHost {
     var currentConfig: Config { config }
     private var fileWatch: DispatchSourceFileSystemObject?
 
-    /// Main table as shipped, without user-dictionary entries; the engine's
-    /// table is rebuilt from this whenever the user dictionary changes.
-    private let baseMain: CodeTable
+    /// Main table of the active scheme as shipped, without user-dictionary
+    /// entries; the engine's table is rebuilt from this whenever the user
+    /// dictionary changes.
+    private var baseMain: CodeTable
+    /// Scheme whose table is currently loaded.
+    private var loadedScheme: Scheme
     private var userDictStamp: FileStamp?
-    /// Per-character stems for auto-encoding code-less user entries. Loaded
-    /// on first need only.
-    private lazy var stems: [Character: String] = Self.loadStems()
+    /// Per-character stems of the active scheme, for auto-encoding code-less
+    /// user entries. Loaded on first need; dropped on scheme switch.
+    private var stemsCache: [Character: String]?
+    private var stems: [Character: String] {
+        if let cached = stemsCache { return cached }
+        let loaded = Self.loadStems(loadedScheme)
+        stemsCache = loaded
+        return loaded
+    }
 
     private init() {
         let cfg = ConfigStore.load()
@@ -30,8 +39,9 @@ final class EngineHost {
 
         Log.engine.log("loading dictionaries…")
         let start = Date()
-        let resources = Self.loadResources()
+        let resources = Self.loadResources(scheme: cfg.scheme)
         self.baseMain = resources.main
+        self.loadedScheme = cfg.scheme
         self.engine = Engine(
             resources: resources,
             config: EngineConfig.from(cfg)
@@ -43,7 +53,7 @@ final class EngineHost {
             try? ConfigStore.save(config)
         }
         loadedStamp = Self.stamp()
-        UserDict.createTemplateIfMissing()
+        UserDict.createTemplateIfMissing(for: cfg.scheme)
         reloadUserDictIfChanged(force: true)
         startWatchingConfig()
     }
@@ -63,8 +73,8 @@ final class EngineHost {
         return candidates.compactMap { $0 }.filter { FileManager.default.fileExists(atPath: $0.path) }
     }
 
-    private static func loadStems() -> [Character: String] {
-        guard let src = sourceURLs("cqlb.dict.yaml").first else { return [:] }
+    private static func loadStems(_ scheme: Scheme) -> [Character: String] {
+        guard let src = sourceURLs(scheme.dictFile).first else { return [:] }
         let cache = cacheDir.appendingPathComponent(DictLoader.cacheFileName(for: src) + ".stems")
         let stems = StemTable.loadCached(source: src, cache: cache)
         Log.engine.log("loaded stems count=\(stems.count)")
@@ -73,21 +83,34 @@ final class EngineHost {
 
     // MARK: - User dictionary
 
-    /// Sources merged into the main table: the bundled `cqlb.src.dict.yaml`
-    /// (the schema's stock user dictionary) and the user's own file.
-    private static var userDictURLs: [URL] {
-        sourceURLs("cqlb.src.dict.yaml").prefix(1) + [UserDict.url]
+    /// Sources merged into the main table: the scheme's stock user
+    /// dictionary (`<scheme>.src.dict.yaml`) and the user's own file.
+    private static func userDictURLs(_ scheme: Scheme) -> [URL] {
+        sourceURLs(scheme.stockUserDictFile).prefix(1) + [UserDict.url(for: scheme)]
+    }
+
+    /// Load the main table of `scheme` and make it the engine's table.
+    /// Called when the scheme setting changes.
+    private func switchScheme(to scheme: Scheme) {
+        let start = Date()
+        baseMain = Self.loadTable(scheme.dictFile) ?? CodeTable(name: "empty", entries: [])
+        loadedScheme = scheme
+        stemsCache = nil
+        UserDict.createTemplateIfMissing(for: scheme)
+        reloadUserDictIfChanged(force: true)
+        let ms = Int(Date().timeIntervalSince(start) * 1000)
+        Log.engine.log("switched scheme to \(scheme.rawValue) in \(ms) ms")
     }
 
     /// Rebuild the engine's main table if the user dictionary file changed.
     func reloadUserDictIfChanged(force: Bool = false) {
-        let current = Self.stamp(of: UserDict.url)
+        let current = Self.stamp(of: UserDict.url(for: loadedScheme))
         guard force || current != userDictStamp else { return }
         userDictStamp = current
 
         var entries: [Entry] = []
         var skipped: [String] = []
-        for url in Self.userDictURLs {
+        for url in Self.userDictURLs(loadedScheme) {
             let parsed = UserDict.load(from: url) { [unowned self] ch in self.stems[ch] }
             entries += parsed.entries
             skipped += parsed.skipped
@@ -100,33 +123,30 @@ final class EngineHost {
         }
     }
 
-    private static func loadResources() -> EngineResources {
+    private static func loadTable(_ filename: String, cap: Int? = nil) -> CodeTable? {
         try? FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
-
-        func loadTable(_ filename: String, cap: Int? = nil) -> CodeTable? {
-            // Remove the pre-fingerprint cache (`<name>.bin`), now orphaned.
-            try? FileManager.default.removeItem(at: cacheDir.appendingPathComponent(filename + ".bin"))
-            for src in sourceURLs(filename) {
-                let cache = cacheDir.appendingPathComponent(DictLoader.cacheFileName(for: src))
-                do {
-                    let result = try DictLoader.loadCached(
-                        source: src,
-                        cache: cache,
-                        options: DictLoadOptions(
-                            maxEntries: cap, minWeight: 0, skipStemColumn: true
-                        )
-                    )
-                    let origin = result.fromCache ? "cache" : "yaml"
-                    Log.engine.log("loaded \(filename) [\(origin)] count=\(result.table.count)")
-                    return result.table
-                } catch {
-                    Log.engine.error("failed to load \(filename): \(error)")
-                }
+        // Remove the pre-fingerprint cache (`<name>.bin`), now orphaned.
+        try? FileManager.default.removeItem(at: cacheDir.appendingPathComponent(filename + ".bin"))
+        for src in sourceURLs(filename) {
+            let cache = cacheDir.appendingPathComponent(DictLoader.cacheFileName(for: src))
+            do {
+                let result = try DictLoader.loadCached(
+                    source: src,
+                    cache: cache,
+                    options: DictLoadOptions(maxEntries: cap, minWeight: 0, skipStemColumn: true)
+                )
+                let origin = result.fromCache ? "cache" : "yaml"
+                Log.engine.log("loaded \(filename) [\(origin)] count=\(result.table.count)")
+                return result.table
+            } catch {
+                Log.engine.error("failed to load \(filename): \(error)")
             }
-            return nil
         }
+        return nil
+    }
 
-        let main = loadTable("cqlb.dict.yaml") ?? CodeTable(name: "empty", entries: [])
+    private static func loadResources(scheme: Scheme) -> EngineResources {
+        let main = loadTable(scheme.dictFile) ?? CodeTable(name: "empty", entries: [])
         let pinyin = loadTable("ipinyin.dict.yaml")
         let english = loadTable("english.dict.yaml")
 
@@ -192,6 +212,9 @@ final class EngineHost {
     private func applyConfig(_ cfg: Config) {
         self.config = cfg
         self.engine.config = EngineConfig.from(cfg)
+        if cfg.scheme != loadedScheme {
+            switchScheme(to: cfg.scheme)
+        }
     }
 
     /// Reload only if the file changed since the last load. Cheap (one

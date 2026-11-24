@@ -5,8 +5,28 @@ import CqlbCore
 struct FunctionsView: View {
     @Bindable var model: SettingsModel
 
+    private var schemeHint: String {
+        switch model.config.scheme {
+        case .cqlb: return "编码用 26 个字母加 ; , . / 四个键"
+        case .cqyx: return "编码只用 26 个字母，; , . / 直接出标点"
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
+            Card("编码方案") {
+                SettingRow("方案", hint: schemeHint) {
+                    Picker("", selection: $model.config.scheme) {
+                        ForEach(Scheme.allCases, id: \.self) { scheme in
+                            Text(scheme.displayName).tag(scheme)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .frame(width: 190)
+                }
+            }
+
             Card("输入辅助") {
                 SettingToggle(
                     "拼音反查",
@@ -16,7 +36,7 @@ struct FunctionsView: View {
                 RowDivider()
                 SettingToggle(
                     "临时英文",
-                    hint: "以 ' 开头输入英文，空格连词，回车上屏",
+                    hint: "以 \(String(model.config.scheme.englishPrefix)) 开头输入英文，空格连词，回车上屏",
                     isOn: $model.config.functions.tempEnglish
                 )
                 RowDivider()
@@ -47,12 +67,13 @@ struct FunctionsView: View {
             }
 
             Card("用户词库") {
-                SettingRow("自定义词条", hint: "每行「词组 Tab 编码」，不写编码则自动编码。保存后立即生效") {
+                SettingRow("自定义词条", hint: "\(model.config.scheme.displayName)的词库。每行「词组 Tab 编码」，不写编码则自动编码，保存后立即生效") {
                     Button("打开词库文件…") {
-                        UserDict.createTemplateIfMissing()
+                        let scheme = model.config.scheme
+                        UserDict.createTemplateIfMissing(for: scheme)
                         let textEdit = URL(fileURLWithPath: "/System/Applications/TextEdit.app")
                         NSWorkspace.shared.open(
-                            [UserDict.url],
+                            [UserDict.url(for: scheme)],
                             withApplicationAt: textEdit,
                             configuration: NSWorkspace.OpenConfiguration()
                         )
