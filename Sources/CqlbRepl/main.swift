@@ -27,7 +27,7 @@ try? fm.createDirectory(atPath: cacheDir, withIntermediateDirectories: true)
 
 func load(_ name: String, cap: Int? = nil) throws -> CodeTable {
     let src = URL(fileURLWithPath: "\(rimeDir)/\(name)")
-    let cache = URL(fileURLWithPath: "\(cacheDir)/\(name).bin")
+    let cache = URL(fileURLWithPath: cacheDir).appendingPathComponent(DictLoader.cacheFileName(for: src))
     let opts = DictLoadOptions(maxEntries: cap, minWeight: 0, skipStemColumn: true)
     let result = try DictLoader.loadCached(source: src, cache: cache, options: opts)
     print("  loaded \(name) [\(result.fromCache ? "cache" : "yaml")] count=\(result.table.count)")

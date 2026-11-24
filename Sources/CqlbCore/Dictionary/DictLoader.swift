@@ -34,21 +34,22 @@ public struct DictLoadOptions: Sendable {
 /// followed by tab-separated data rows. Data row format depends on declared columns.
 public enum DictLoader {
 
-    /// Load a dictionary, preferring a binary cache if one exists and is fresh.
-    /// On cache miss, parses the YAML source and writes a new cache.
+    /// Load a dictionary, preferring a binary cache if its stored fingerprint
+    /// matches the current source.
+    ///
+    /// The fingerprint covers the source path, size, mtime and the load
+    /// options, so the cache is invalidated by any of: a different source
+    /// file (bundle vs `~/Library/Rime`), an updated dictionary shipped with
+    /// an *older* mtime (pkg installs preserve mtimes), or different
+    /// `DictLoadOptions`. A plain `cacheMtime >= srcMtime` check misses the
+    /// latter two cases.
     public static func loadCached(
         source: URL,
         cache: URL,
         options: DictLoadOptions = .default
     ) throws -> (table: CodeTable, fromCache: Bool) {
-        let fm = FileManager.default
-        if fm.fileExists(atPath: cache.path),
-           let srcAttrs = try? fm.attributesOfItem(atPath: source.path),
-           let cacheAttrs = try? fm.attributesOfItem(atPath: cache.path),
-           let srcMtime = srcAttrs[.modificationDate] as? Date,
-           let cacheMtime = cacheAttrs[.modificationDate] as? Date,
-           cacheMtime >= srcMtime
-        {
+        let fp = try fingerprint(source: source, options: options)
+        if BinaryCache.readFingerprint(from: cache) == fp {
             do {
                 let table = try BinaryCache.read(from: cache)
                 return (table, true)
@@ -58,8 +59,46 @@ public enum DictLoader {
         }
 
         let table = try load(from: source, options: options)
-        try? BinaryCache.write(table, to: cache)
+        try? BinaryCache.write(table, to: cache, fingerprint: fp)
         return (table, false)
+    }
+
+    /// Cache file name for a source. Includes a hash of the absolute source
+    /// path so two sources with the same file name never share one cache.
+    public static func cacheFileName(for source: URL) -> String {
+        let h = fnv1a64(Array(source.standardizedFileURL.path.utf8))
+        return "\(source.lastPathComponent).\(String(h, radix: 16)).bin"
+    }
+
+    static func fingerprint(source: URL, options: DictLoadOptions) throws -> UInt64 {
+        let attrs: [FileAttributeKey: Any]
+        do {
+            attrs = try FileManager.default.attributesOfItem(atPath: source.path)
+        } catch {
+            throw DictLoadError.fileNotFound(source)
+        }
+        let size = (attrs[.size] as? NSNumber)?.uint64Value ?? 0
+        let mtime = (attrs[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+        let key = [
+            source.standardizedFileURL.path,
+            String(size),
+            String(mtime.bitPattern),
+            String(options.maxEntries ?? -1),
+            String(options.minWeight),
+            String(options.skipStemColumn),
+            String(BinaryCache.version),
+        ].joined(separator: "\u{1F}")
+        return fnv1a64(Array(key.utf8))
+    }
+
+    /// FNV-1a 64-bit. Deterministic across processes, unlike `Hasher`.
+    static func fnv1a64(_ bytes: [UInt8]) -> UInt64 {
+        var h: UInt64 = 0xcbf2_9ce4_8422_2325
+        for b in bytes {
+            h ^= UInt64(b)
+            h = h &* 0x0000_0100_0000_01B3
+        }
+        return h
     }
 
     public static func load(

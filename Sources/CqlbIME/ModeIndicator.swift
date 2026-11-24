@@ -1,4 +1,18 @@
 import AppKit
+import CqlbCore
+
+extension Config.Appearance.AccentColor {
+    var nsColor: NSColor {
+        switch self {
+        case .red:    return .systemRed
+        case .orange: return .systemOrange
+        case .green:  return .systemGreen
+        case .blue:   return .systemBlue
+        case .purple: return .systemPurple
+        case .teal:   return .systemTeal
+        }
+    }
+}
 
 /// Shows a brief floating indicator when switching between Chinese / English
 /// mode. Appears near the active text caret, fades out after ~0.8 seconds.
@@ -59,7 +73,9 @@ final class ModeIndicator {
         // they stick on whatever appearance they had when first shown.
         window.appearance = NSApp.effectiveAppearance
         label.stringValue = chinese ? "中" : "英"
-        label.textColor = chinese ? .systemRed : .labelColor
+        // Follow the configured accent color (was hard-coded red).
+        let accent = EngineHost.shared.currentConfig.appearance.accentColor.nsColor
+        label.textColor = chinese ? accent : .labelColor
 
         let screen = Self.screen(containing: caretRect)
             ?? NSScreen.main

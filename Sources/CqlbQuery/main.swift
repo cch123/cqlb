@@ -55,7 +55,7 @@ let queries = Array(args.dropFirst())
 
 let url = URL(fileURLWithPath: (dictPath as NSString).expandingTildeInPath)
 let cacheURL = URL(fileURLWithPath: cacheDir)
-    .appendingPathComponent(url.lastPathComponent + ".bin")
+    .appendingPathComponent(DictLoader.cacheFileName(for: url))
 
 let loadStart = Date()
 let table: CodeTable

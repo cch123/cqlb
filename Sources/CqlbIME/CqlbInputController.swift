@@ -34,7 +34,7 @@ final class CqlbInputController: IMKInputController {
         super.activateServer(sender)
         // Fresh composition state per client activation. Config may have
         // changed via Settings since we last looked.
-        EngineHost.shared.forceReloadConfig()
+        EngineHost.shared.reloadConfigIfChanged()
         EngineHost.shared.engine.reset()
         Log.imk.log("activateServer")
     }
@@ -87,36 +87,37 @@ final class CqlbInputController: IMKInputController {
     /// distributable IME bundle does not depend on a second app being
     /// installed beside it.
     override func menu() -> NSMenu! {
-        Log.imk.log("menu requested")
+        // The system asks for the menu far more often than it shows it
+        // (observed: once per keystroke), so build it once per controller
+        // and keep this path free of logging and allocation.
+        return cachedMenu
+    }
+
+    private lazy var cachedMenu: NSMenu = {
         let menu = NSMenu()
         menu.autoenablesItems = false
 
-        let settings = NSMenuItem(
-            title: "设置…",
-            action: #selector(openSettingsMenuItem),
-            keyEquivalent: ""
-        )
-        // macOS 26 may dispatch IMK menu items as ordinary AppKit
-        // target/action instead of routing through doCommand(by:command:).
-        // Keep the target explicit, while doCommand below covers the classic
-        // IMK command path.
-        settings.target = self
-        settings.isEnabled = true
-        menu.addItem(settings)
+        func item(_ titleKey: String, _ action: Selector) -> NSMenuItem {
+            let item = NSMenuItem(
+                title: NSLocalizedString(titleKey, comment: ""),
+                action: action,
+                keyEquivalent: ""
+            )
+            // macOS 26 may dispatch IMK menu items as ordinary AppKit
+            // target/action instead of routing through
+            // doCommand(by:command:). Keep the target explicit, while
+            // doCommand below covers the classic IMK command path.
+            item.target = self
+            item.isEnabled = true
+            return item
+        }
 
+        menu.addItem(item("Settings...", #selector(openSettingsMenuItem)))
+        menu.addItem(item("Edit User Dictionary...", #selector(openUserDictMenuItem)))
         menu.addItem(NSMenuItem.separator())
-
-        let about = NSMenuItem(
-            title: "关于超强两笔",
-            action: #selector(openAboutMenuItem),
-            keyEquivalent: ""
-        )
-        about.target = self
-        about.isEnabled = true
-        menu.addItem(about)
-
+        menu.addItem(item("About cqlb", #selector(openAboutMenuItem)))
         return menu
-    }
+    }()
 
     /// IMK menu commands are not normal AppKit target/action dispatch. The
     /// system calls this method with the menu item's selector, and older IMK
@@ -131,6 +132,8 @@ final class CqlbInputController: IMKInputController {
             openSettings(info)
         } else if selector == #selector(openAboutMenuItem) || selector == #selector(openAbout(_:)) {
             openAbout(info)
+        } else if selector == #selector(openUserDictMenuItem) {
+            openUserDictMenuItem()
         } else {
             super.doCommand(by: selector, command: info)
         }
@@ -154,6 +157,21 @@ final class CqlbInputController: IMKInputController {
             SettingsWindowPresenter.shared.show {
                 EngineHost.shared.forceReloadConfig()
             }
+        }
+    }
+
+    @objc
+    func openUserDictMenuItem() {
+        Log.imk.log("open user dictionary requested")
+        DispatchQueue.main.async {
+            // The dictionary of the scheme currently in use.
+            let scheme = EngineHost.shared.currentConfig.scheme
+            UserDict.createTemplateIfMissing(for: scheme)
+            // Open as plain text regardless of the .yaml handler; edits are
+            // picked up by EngineHost's directory watcher on save.
+            let config = NSWorkspace.OpenConfiguration()
+            let textEdit = URL(fileURLWithPath: "/System/Applications/TextEdit.app")
+            NSWorkspace.shared.open([UserDict.url(for: scheme)], withApplicationAt: textEdit, configuration: config)
         }
     }
 
@@ -192,7 +210,21 @@ final class CqlbInputController: IMKInputController {
     private func handleFlagsChanged(_ event: NSEvent, client sender: Any!) -> Bool {
         // keyCode 0x38 = left Shift, 0x3C = right Shift
         let keyCode = event.keyCode
-        guard keyCode == 0x38 || keyCode == 0x3C else { return false }
+        guard keyCode == 0x38 || keyCode == 0x3C else {
+            // Another modifier changed while Shift is down (e.g. Shift+Cmd):
+            // Shift is a modifier, not a tap.
+            if shiftDownTime > 0 { shiftWasUsedAsModifier = true }
+            return false
+        }
+        let tapSetting = EngineHost.shared.currentConfig.shortcuts.shiftTap
+        let keyEnabled: Bool
+        switch tapSetting {
+        case .both:  keyEnabled = true
+        case .left:  keyEnabled = keyCode == 0x38
+        case .right: keyEnabled = keyCode == 0x3C
+        case .none:  keyEnabled = false
+        }
+        guard keyEnabled else { return false }
 
         let shiftOn = event.modifierFlags.contains(.shift)
         if shiftOn {
@@ -205,6 +237,14 @@ final class CqlbInputController: IMKInputController {
             // the system also delivers one) from re-triggering the toggle
             // and making it look like Shift was tapped twice.
             shiftDownTime = 0
+            // Shift+click (extend selection) produces no keyDown, so the
+            // keyDown-based check above misses it. Ask the window server
+            // whether a mouse button went down while Shift was held.
+            let sinceClick = min(
+                CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .leftMouseDown),
+                CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .rightMouseDown)
+            )
+            if sinceClick < elapsed { shiftWasUsedAsModifier = true }
             if !shiftWasUsedAsModifier && elapsed < shiftTapThreshold && elapsed > 0.01 {
                 toggleChineseEnglish(client: sender)
             }
@@ -222,9 +262,7 @@ final class CqlbInputController: IMKInputController {
             shiftWasUsedAsModifier = true
         }
 
-        // Option+Space: toggle Chinese/English mode.
-        // keyCode 49 = space.
-        if event.keyCode == 49 && event.modifierFlags.contains(.option) {
+        if isToggleChord(event) {
             toggleChineseEnglish(client: sender)
             return true
         }
@@ -255,6 +293,18 @@ final class CqlbInputController: IMKInputController {
             commit(text, to: sender)
             updateUI(state: state, client: sender)
             return true
+        }
+    }
+
+    /// Chinese/English toggle chord per `shortcuts.toggleChineseEnglish`.
+    /// The chord must be exact: Option+Cmd+Space etc. are left to the system.
+    private func isToggleChord(_ event: NSEvent) -> Bool {
+        guard event.keyCode == 49 else { return false }  // space
+        let mods = event.modifierFlags.intersection([.shift, .control, .option, .command])
+        switch EngineHost.shared.currentConfig.shortcuts.toggleChineseEnglish {
+        case .optionSpace: return mods == .option
+        case .shiftSpace:  return mods == .shift
+        case .none:        return false
         }
     }
 
@@ -292,10 +342,16 @@ final class CqlbInputController: IMKInputController {
         // active text field instead of drawing it only in our candidate UI.
         setMarkedText(state.preedit, client: sender)
 
+        // Mouse selection. The handler resolves the client at click time via
+        // `client()` rather than capturing `sender`.
+        let onSelect: (Int) -> Void = { [weak self] index in
+            self?.candidateClicked(index)
+        }
+
         if state.candidates.isEmpty {
-            if (state.isPinyinMode || state.isEnglishMode) && !state.preedit.isEmpty {
+            if state.keepsPreeditWithoutCandidates && !state.preedit.isEmpty {
                 let caret = clientCaretRect(sender, markedLength: (state.preedit as NSString).length)
-                CandidateWindowController.shared.show(state: state, near: caret)
+                CandidateWindowController.shared.show(state: state, near: caret, onSelect: onSelect)
                 return
             }
             CandidateWindowController.shared.hide()
@@ -307,7 +363,21 @@ final class CqlbInputController: IMKInputController {
         }
 
         let caret = clientCaretRect(sender, markedLength: (state.preedit as NSString).length)
-        CandidateWindowController.shared.show(state: state, near: caret)
+        CandidateWindowController.shared.show(state: state, near: caret, onSelect: onSelect)
+    }
+
+    /// A candidate was clicked in the candidate window.
+    private func candidateClicked(_ index: Int) {
+        guard let client = self.client() else { return }
+        switch EngineHost.shared.engine.selectCandidate(at: index) {
+        case .commit(let text, let state):
+            commit(text, to: client)
+            updateUI(state: state, client: client)
+        case .update(let state):
+            updateUI(state: state, client: client)
+        case .passthrough:
+            break
+        }
     }
 
     /// Ask the client for the screen-coordinate rect of the marked text's
@@ -423,6 +493,11 @@ final class CqlbInputController: IMKInputController {
         // event were passed through (respects shift/option/layout). That is
         // exactly what the engine expects.
         if let s = event.characters, let c = s.first {
+            // Function keys (F1…, Home, End, forward delete …) arrive as
+            // private-use scalars U+F700–U+F8FF. They carry no text.
+            if let scalar = c.unicodeScalars.first, (0xF700...0xF8FF).contains(scalar.value) {
+                return KeyEvent(char: nil, modifiers: mods)
+            }
             return KeyEvent(char: c, modifiers: mods)
         }
         return KeyEvent(char: nil, modifiers: mods)

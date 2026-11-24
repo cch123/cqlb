@@ -11,6 +11,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
+// Development mode: `cqlb-ime --preview-candidates [horizontal|vertical]
+// [light|dark] [header] [red|orange|green|blue|purple|teal]` shows the
+// candidate window with sample data over a backdrop window, without
+// registering as an input method. Used to check candidate-window styling.
+if CommandLine.arguments.contains("--preview-candidates") {
+    CandidatePreviewMode.run(arguments: CommandLine.arguments)
+}
+
 // Keep a strong reference so IMKServer isn't deallocated while the run
 // loop is alive. The connection name MUST match the
 // `InputMethodConnectionName` key in Info.plist.

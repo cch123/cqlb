@@ -66,27 +66,33 @@ NSColor.clear.setFill()
 rect.fill()
 
 do {
-    // White rounded-square background, close to Squirrel's app icon.
-    let inset = side * 0.08
+    // White rounded-square background on Apple's macOS icon grid: an
+    // 824pt body in a 1024pt canvas (≈9.8% margin), corner radius ≈185pt.
+    let inset = side * (100.0 / 1024.0)
     let bgRect = NSRect(x: inset, y: inset, width: side - inset * 2, height: side - inset * 2)
-    let bg = NSBezierPath(
-        roundedRect: bgRect,
-        xRadius: side * 0.17,
-        yRadius: side * 0.17
-    )
+    let radius = side * (185.0 / 1024.0)
+    let bg = NSBezierPath(roundedRect: bgRect, xRadius: radius, yRadius: radius)
     NSColor(calibratedRed: 0.98, green: 0.979, blue: 0.975, alpha: 1).setFill()
     bg.fill()
 
-    let attrs: [NSAttributedString.Key: Any] = [
-        .font: NSFont.boldSystemFont(ofSize: side * 0.55),
+    // Center the glyph by its actual ink bounds, not by font metrics.
+    // `NSString.size` returns the typographic line box (ascent + descent);
+    // a CJK glyph's ink sits below the middle of that box, so metric
+    // centering — plus the old fixed downward nudge — left the character
+    // visibly low in the tile.
+    let font = NSFont.boldSystemFont(ofSize: side * 0.52)
+    let attributed = NSAttributedString(string: glyph as String, attributes: [
+        .font: font,
         .foregroundColor: NSColor(calibratedRed: 0.08, green: 0.085, blue: 0.09, alpha: 1),
-    ]
-    let glyphSize = glyph.size(withAttributes: attrs)
-    let origin = NSPoint(
-        x: (side - glyphSize.width) / 2,
-        y: (side - glyphSize.height) / 2 - side * 0.03
+    ])
+    let line = CTLineCreateWithAttributedString(attributed)
+    let ink = CTLineGetBoundsWithOptions(line, .useGlyphPathBounds)
+    let ctx = NSGraphicsContext.current!.cgContext
+    ctx.textPosition = CGPoint(
+        x: bgRect.midX - ink.midX,
+        y: bgRect.midY - ink.midY
     )
-    glyph.draw(at: origin, withAttributes: attrs)
+    CTLineDraw(line, ctx)
 }
 NSGraphicsContext.restoreGraphicsState()
 

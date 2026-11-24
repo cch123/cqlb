@@ -10,6 +10,7 @@ let package = Package(
         .executable(name: "cqlb-query", targets: ["CqlbQuery"]),
         .executable(name: "cqlb-repl", targets: ["CqlbRepl"]),
         .executable(name: "cqlb-ime", targets: ["CqlbIME"]),
+        .executable(name: "cqlb-settings-preview", targets: ["CqlbSettingsPreview"]),
     ],
     targets: [
         .target(
@@ -35,6 +36,16 @@ let package = Package(
                 .linkedFramework("InputMethodKit"),
                 .linkedFramework("Carbon"),
             ]
+        ),
+        .executableTarget(
+            name: "CqlbSettingsPreview",
+            dependencies: ["CqlbSettingsUI"],
+            path: "Sources/CqlbSettingsPreview"
+        ),
+        .testTarget(
+            name: "CqlbCoreTests",
+            dependencies: ["CqlbCore"],
+            path: "Tests/CqlbCoreTests"
         ),
         .target(
             name: "CqlbSettingsUI",
