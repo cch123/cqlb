@@ -14,19 +14,30 @@ extension Config.Appearance.AccentColor {
     }
 }
 
-/// Shows a brief floating indicator when switching between Chinese / English
-/// mode. Appears near the active text caret, fades out after ~0.8 seconds.
+/// Shows a brief indicator when switching between Chinese / English mode.
+/// Modelled on the macOS 14+ system input-source indicator: a compact
+/// accent-tinted badge anchored directly below the text caret, which fades
+/// in, stays for about a second and fades out.
 final class ModeIndicator {
     static let shared = ModeIndicator()
 
+    private static let size = NSSize(width: 28, height: 24)
+    private static let cornerRadius: CGFloat = 6
+    private static let caretGap: CGFloat = 3
+    private static let visibleDuration: TimeInterval = 1.0
+    private static let fadeInDuration: TimeInterval = 0.12
+    private static let fadeOutDuration: TimeInterval = 0.25
+
     private let window: NSPanel
+    private let tint: NSView
     private let label: NSTextField
     private var hideTimer: Timer?
+    /// Incremented on every `show`; lets a fade-out completion handler detect
+    /// that a newer `show` superseded it and skip its `orderOut`.
+    private var generation = 0
 
     private init() {
-        let w: CGFloat = 140
-        let h: CGFloat = 60
-        let frame = NSRect(x: 0, y: 0, width: w, height: h)
+        let frame = NSRect(origin: .zero, size: Self.size)
 
         let panel = NSPanel(
             contentRect: frame,
@@ -39,20 +50,26 @@ final class ModeIndicator {
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hidesOnDeactivate = false
+        panel.ignoresMouseEvents = true
         panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary]
 
         let vfx = NSVisualEffectView(frame: frame)
-        vfx.material = .hudWindow
+        vfx.material = .popover
         vfx.blendingMode = .behindWindow
         vfx.state = .active
-        vfx.wantsLayer = true
-        vfx.layer?.cornerRadius = 16
-        vfx.layer?.masksToBounds = true
+        // A mask image (rather than layer.cornerRadius) makes the window
+        // server clip both the blur and the window shadow to the rounded
+        // shape, so no rectangular shadow corners remain visible.
+        vfx.maskImage = Self.roundedMask(radius: Self.cornerRadius)
         vfx.autoresizingMask = [.width, .height]
 
+        let tintView = NSView(frame: frame)
+        tintView.wantsLayer = true
+        tintView.autoresizingMask = [.width, .height]
+        vfx.addSubview(tintView)
+
         let tf = NSTextField(labelWithString: "")
-        tf.font = .systemFont(ofSize: 24, weight: .semibold)
-        tf.textColor = .labelColor
+        tf.font = .systemFont(ofSize: 13, weight: .medium)
         tf.alignment = .center
         tf.translatesAutoresizingMaskIntoConstraints = false
         vfx.addSubview(tf)
@@ -63,35 +80,68 @@ final class ModeIndicator {
 
         panel.contentView = vfx
         self.window = panel
+        self.tint = tintView
         self.label = tf
     }
 
     func show(chinese: Bool, near caretRect: NSRect = .zero) {
         hideTimer?.invalidate()
+        generation += 1
+        let current = generation
+
         // Explicitly follow the current system appearance. NSPanels
         // without a parent window don't automatically inherit dark mode —
         // they stick on whatever appearance they had when first shown.
-        window.appearance = NSApp.effectiveAppearance
-        label.stringValue = chinese ? "中" : "英"
-        // Follow the configured accent color (was hard-coded red).
+        let appearance = NSApp.effectiveAppearance
+        window.appearance = appearance
+
+        // Same glyphs as the system indicator: "A" for the Latin layout, a
+        // single CJK character for the Chinese input mode. Both modes use
+        // the accent colour; the glyph alone distinguishes them.
+        label.stringValue = chinese ? "中" : "A"
         let accent = EngineHost.shared.currentConfig.appearance.accentColor.nsColor
-        label.textColor = chinese ? accent : .labelColor
+        label.textColor = accent
+        // CGColor is not dynamic, so resolve it under the current appearance.
+        appearance.performAsCurrentDrawingAppearance {
+            tint.layer?.backgroundColor = accent.withAlphaComponent(0.16).cgColor
+        }
 
         let screen = Self.screen(containing: caretRect)
             ?? NSScreen.main
             ?? NSScreen.screens.first!
         window.setFrameOrigin(Self.origin(near: caretRect, in: screen.visibleFrame, size: window.frame.size))
-        window.alphaValue = 1.0
-        window.orderFrontRegardless()
 
-        hideTimer = Timer.scheduledTimer(withTimeInterval: 0.8, repeats: false) { [weak self] _ in
+        if !window.isVisible {
+            window.alphaValue = 0
+        }
+        window.orderFrontRegardless()
+        window.invalidateShadow()
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = Self.fadeInDuration
+            window.animator().alphaValue = 1
+        }
+
+        hideTimer = Timer.scheduledTimer(withTimeInterval: Self.visibleDuration, repeats: false) { [weak self] _ in
             NSAnimationContext.runAnimationGroup { ctx in
-                ctx.duration = 0.3
+                ctx.duration = Self.fadeOutDuration
                 self?.window.animator().alphaValue = 0
             } completionHandler: {
-                self?.window.orderOut(nil)
+                guard let self, self.generation == current else { return }
+                self.window.orderOut(nil)
             }
         }
+    }
+
+    private static func roundedMask(radius: CGFloat) -> NSImage {
+        let edge = radius * 2 + 1
+        let image = NSImage(size: NSSize(width: edge, height: edge), flipped: false) { rect in
+            NSColor.black.setFill()
+            NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius).fill()
+            return true
+        }
+        image.capInsets = NSEdgeInsets(top: radius, left: radius, bottom: radius, right: radius)
+        image.resizingMode = .stretch
+        return image
     }
 
     private static func screen(containing rect: NSRect) -> NSScreen? {
@@ -102,7 +152,7 @@ final class ModeIndicator {
     }
 
     private static func origin(near caretRect: NSRect, in screenFrame: NSRect, size: NSSize) -> NSPoint {
-        let margin: CGFloat = 8
+        let margin: CGFloat = 4
 
         guard isUsable(caretRect) else {
             return NSPoint(
@@ -113,11 +163,11 @@ final class ModeIndicator {
 
         var origin = NSPoint(
             x: caretRect.midX - size.width / 2,
-            y: caretRect.minY - size.height - margin
+            y: caretRect.minY - size.height - caretGap
         )
 
         if origin.y < screenFrame.minY + margin {
-            origin.y = caretRect.maxY + margin
+            origin.y = caretRect.maxY + caretGap
         }
         if origin.x + size.width > screenFrame.maxX - margin {
             origin.x = screenFrame.maxX - size.width - margin
