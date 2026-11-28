@@ -34,7 +34,8 @@ public struct Config: Codable, Sendable, Equatable {
 
     public struct Functions: Codable, Sendable, Equatable {
         public var emojiSuggestion: Bool = true
-        public var gb2312Filter: Bool = true
+        /// Both code tables contain Hanzi outside GB2312, so filtering is opt-in.
+        public var gb2312Filter: Bool = false
         public var tempEnglish: Bool = true
         public var tempPinyin: Bool = true
         public var reverseLookupDisplay: ReverseLookup = .code

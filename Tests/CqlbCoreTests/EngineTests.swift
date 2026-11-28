@@ -171,8 +171,14 @@ final class EngineTests: XCTestCase {
     func testGb2312ToggleAppliesLive() {
         let e = makeEngine()
         e.type("k")
+        XCTAssertTrue(e.currentState().candidates.contains { $0.text == "䶮" })
+
+        e.reset()
+        e.config.enableGb2312 = true
+        e.type("k")
         XCTAssertFalse(e.currentState().candidates.contains { $0.text == "䶮" })
         XCTAssertTrue(e.currentState().candidates.contains { $0.text == "①" })
+
         e.reset()
         e.config.enableGb2312 = false
         e.type("k")
@@ -241,6 +247,7 @@ final class ConfigTests: XCTestCase {
         let cfg = ConfigStore.decode(Data(json.utf8))
         XCTAssertEqual(cfg.appearance.fontSize, 20)
         XCTAssertEqual(cfg.appearance.candidateCount, Config.Appearance().candidateCount)
+        XCTAssertFalse(cfg.functions.gb2312Filter)
         XCTAssertFalse(cfg.functions.tempPinyin)
         XCTAssertEqual(cfg.shortcuts, Config.Shortcuts())
     }
@@ -262,6 +269,7 @@ final class ConfigTests: XCTestCase {
     func testRoundTrip() throws {
         var cfg = Config()
         cfg.shortcuts.shiftTap = .left
+        cfg.functions.gb2312Filter = true
         cfg.functions.reverseLookupDisplay = .both
         let data = try JSONEncoder().encode(cfg)
         XCTAssertEqual(ConfigStore.decode(data), cfg)

@@ -23,18 +23,7 @@ public struct EngineConfig: Sendable, Equatable {
         case none, code, pinyin, both
     }
 
-    public static let `default` = EngineConfig(
-        candidateCount: 6,
-        maxCodeLength: 4,
-        autoSelect: true,
-        enableTempEnglish: true,
-        enableTempPinyin: true,
-        enableEmoji: true,
-        enableGb2312: true,
-        enableRecognizer: true,
-        annotation: .code,
-        scheme: .cqlb
-    )
+    public static let `default` = EngineConfig.from(Config())
 
     public init(
         candidateCount: Int,
